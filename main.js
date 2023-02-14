@@ -48,18 +48,18 @@ windowCanvas.addEventListener('mousemove', e => {
     
     let gap, dw = 0, dh = 0, offsetX = 0, offsetY = 0;
     
-    if (gap = mouseX - imageCanvas.width + windowX > 0) { // right
+    if ((gap = mouseX - imageCanvas.width + windowX) > 0) { // right
         dw = gap;
-    } else if (gap = mouseX + windowX < 0) { // left
-        dw = gap;
+    } else if ((gap = mouseX + windowX) < 0) { // left
+        dw = -gap;
         offsetX = dw;
         windowX = -mouseX;
     }
     
-    if (gap = mouseY - imageCanvas.height + windowY > 0) { // below
+    if ((gap = mouseY - imageCanvas.height + windowY) > 0) { // below
         dh = gap;
-    } else if (gap = mouseY + windowY < 0) { // above
-        dh = gap;
+    } else if ((gap = mouseY + windowY) < 0) { // above
+        dh = -gap;
         offsetY = dh;
         windowY = -mouseY;
     }
@@ -71,7 +71,7 @@ windowCanvas.addEventListener('mousemove', e => {
         imageContext.putImageData(data, offsetX, offsetY);
     }
     
-    imageContext.lineTo(mouseX, mouseY);
+    imageContext.lineTo(windowX + mouseX, windowY + mouseY);
     imageContext.stroke();
     
     windowContext.clearRect(0, 0, windowCanvas.width, windowCanvas.height);
