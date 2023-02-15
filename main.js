@@ -1,98 +1,76 @@
 let debugInfo = document.getElementById('debug');
 
 let imageCanvas = document.createElement('canvas');
-let imageContext = imageCanvas.getContext('2d');
+let imageContext = imageCanvas.getContext('2d', { willReadFrequently: true });
 let frameCanvas = document.querySelector('canvas');
 let frameContext = frameCanvas.getContext('2d');
-
-let isDrawing = false;
 
 // frameCanvas.width = window.innerWidth;
 // frameCanvas.height = window.innerHeight;
 frameCanvas.width = 960;
 frameCanvas.height = 540;
 
-imageCanvas.width = 0;
-imageCanvas.height = 0;
+imageCanvas.width = 1920;
+imageCanvas.height = 1080;
 
-let frameX, frameY; // window in image
-let mouseX, mouseY; // mouse in window
-let padding = 10; // image canvas padding
+// let scale = frameCanvas.width / imageCanvas.width;
+let scale = 0.25;
+frameContext.scale(scale, scale);
+
+imageContext.lineWidth = 5;
+
+let isDrawing = false;
+
+let frameX = 0, frameY = 0; // frame in image
+let mouseX, mouseY; // mouse in image
 
 let frameRect = frameCanvas.getBoundingClientRect();
 
 function setMousePosition(e) {
-    mouseX = e.clientX - frameRect.left;
-    mouseY = e.clientY - frameRect.top;
+    mouseX = e.pageX / scale - frameX;
+    mouseY = e.pageY / scale - frameY;
 }
 
-frameCanvas.addEventListener('mousedown', e => {
+document.addEventListener('mousedown', e => {
     if (e.button != 0) return; // left click only
     
     setMousePosition(e);
     
-    if (imageCanvas.width == 0 && imageCanvas.height == 0) {
-        imageCanvas.width = padding * 2 + 1;
-        imageCanvas.height = padding * 2 + 1;
-        frameX = -mouseX + padding;
-        frameY = -mouseY + padding;
-    }
-    
     imageContext.beginPath();
-    imageContext.moveTo(frameX + mouseX, frameY + mouseY);
+    imageContext.moveTo(mouseX, mouseY);
     
     isDrawing = true;
 });
 
-frameCanvas.addEventListener('mousemove', e => {
+document.addEventListener('mousemove', e => {
     if (!isDrawing) return;
     
     setMousePosition(e);
     
-    let dw, dh;
-    
-    if ((dw = mouseX - imageCanvas.width + padding + frameX) > 0) { // right
-    } else if ((dw = mouseX + frameX - padding) < 0) { // left
-        frameX -= dw;
-    } else { // between
-        dw = 0;
-    }
-    
-    if ((dh = mouseY - imageCanvas.height + padding + frameY) > 0) { // below
-    } else if ((dh = mouseY + frameY - padding) < 0) { // above
-        frameY -= dh;
-    } else { // between
-        dh = 0;
-    }
-    
-    if (dw || dh) { // resize
-        let data = imageContext.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
-        imageCanvas.width += dw > 0 ? dw : -dw;
-        imageCanvas.height += dh > 0 ? dh : -dh;
-        imageContext.putImageData(data, dw < 0 ? -dw : 0, dh < 0 ? -dh : 0);
-    }
-    
-    imageContext.lineTo(frameX + mouseX, frameY + mouseY);
+    imageContext.lineTo(mouseX, mouseY);
     imageContext.stroke();
     
-    let data = imageContext.getImageData(frameX, frameY, frameCanvas.width, frameCanvas.height);
-    frameContext.putImageData(data, 0, 0);
+    // let data = imageContext.getImageData(frameX, frameY, frameCanvas.width / scale, frameCanvas.height / scale);
+    frameContext.drawImage(imageCanvas, 0, 0);
 });
 
-frameCanvas.addEventListener('mouseup', e => {
+document.addEventListener('mouseup', e => {
     if (e.button != 0) return; // left click only
     
     isDrawing = false;
 });
 
 document.addEventListener('mousemove', e => {
+    // setMousePosition(e);
     debugInfo.innerHTML = `
+        pageX: ${e.pageX}<br>
+        pageY: ${e.pageY}<br>
+        clientX: ${e.clientX}<br>
+        clientY: ${e.clientY}<br>
         mouseX: ${mouseX}<br>
         mouseY: ${mouseY}<br>
-        windowX: ${frameX}<br>
-        windowY: ${frameY}<br>
-        imageCanvas.width: ${imageCanvas.width}<br>
-        imageCanvas.height: ${imageCanvas.height}<br>
+        frameX: ${frameX}<br>
+        frameY: ${frameY}<br>
     `;
 });
 
