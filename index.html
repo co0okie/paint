@@ -7,21 +7,24 @@
         margin: 0;
         /* background-color: black; */
       }
+      body::-webkit-scrollbar {
+        display: none;
+      }
       canvas {
-        background-color: #ccc;
+        background-color: #00000008;
         display: block;
       }
       #debug {
         position: fixed;
         top: 0;
         right: 0;
-        font-size: 1vw;
+        font-size: 2vw;
       }
     </style>
   </head>
   <body>
     <canvas></canvas>
-    <div id="debug"></div>
+    <!-- <div id="debug"></div> -->
     <script src="main.js"></script>
   </body>
 </html>

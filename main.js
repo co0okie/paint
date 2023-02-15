@@ -1,67 +1,119 @@
 let debugInfo = document.getElementById('debug');
 
 let imageCanvas = document.createElement('canvas');
-let imageContext = imageCanvas.getContext('2d', { willReadFrequently: true });
+let imageContext = imageCanvas.getContext('2d');
 let frameCanvas = document.querySelector('canvas');
 let frameContext = frameCanvas.getContext('2d');
 
-// frameCanvas.width = window.innerWidth;
-// frameCanvas.height = window.innerHeight;
-frameCanvas.width = 960;
-frameCanvas.height = 540;
+frameCanvas.width = window.innerWidth;
+frameCanvas.height = window.innerHeight;
 
 imageCanvas.width = 1920;
 imageCanvas.height = 1080;
 
-// let scale = frameCanvas.width / imageCanvas.width;
-let scale = 0.25;
-frameContext.scale(scale, scale);
+let scale =  imageCanvas.width / frameCanvas.width;
 
-imageContext.lineWidth = 5;
+imageContext.lineWidth = 3;
+imageContext.lineCap = 'round';
+imageContext.lineJoin = 'round';
 
-let isDrawing = false;
+let drawing = false, moving = false;
 
 let frameX = 0, frameY = 0; // frame in image
+let oldPageX, oldPageY;
 let mouseX, mouseY; // mouse in image
 
-let frameRect = frameCanvas.getBoundingClientRect();
+print();
 
 function setMousePosition(e) {
-    mouseX = e.pageX / scale - frameX;
-    mouseY = e.pageY / scale - frameY;
+    mouseX = e.pageX * scale + frameX;
+    mouseY = e.pageY * scale + frameY;
 }
 
-document.addEventListener('mousedown', e => {
-    if (e.button != 0) return; // left click only
-    
-    setMousePosition(e);
-    
+function print() {
+    frameContext.clearRect(0, 0, frameCanvas.width, frameCanvas.height);
+    frameContext.fillStyle = '#00000008';
+    frameContext.fillRect(-frameX / scale, -frameY / scale, imageCanvas.width / scale, imageCanvas.height / scale);
+    frameContext.drawImage(imageCanvas,
+        frameX, frameY, frameCanvas.width * scale, frameCanvas.height * scale,
+        0, 0, frameCanvas.width, frameCanvas.height
+    );
+}
+
+function startDraw(e) {
     imageContext.beginPath();
     imageContext.moveTo(mouseX, mouseY);
     
-    isDrawing = true;
-});
+    drawing = true;
+}
 
-document.addEventListener('mousemove', e => {
-    if (!isDrawing) return;
-    
-    setMousePosition(e);
-    
+function draw(e) {
     imageContext.lineTo(mouseX, mouseY);
     imageContext.stroke();
     
-    // let data = imageContext.getImageData(frameX, frameY, frameCanvas.width / scale, frameCanvas.height / scale);
-    frameContext.drawImage(imageCanvas, 0, 0);
-});
+    print();
+}
 
-document.addEventListener('mouseup', e => {
-    if (e.button != 0) return; // left click only
+function move(e) {
+    frameX += (oldPageX - e.pageX) * scale;
+    frameY += (oldPageY - e.pageY) * scale;
     
-    isDrawing = false;
+    print();
+}
+
+document.addEventListener('mousedown', e => {
+    switch (e.button) {
+        case 0: // left click
+            startDraw(e);
+            break;
+        case 1: // wheel click
+            e.preventDefault();
+            moving = true;
+            break;
+    }
 });
 
 document.addEventListener('mousemove', e => {
-    // setMousePosition(e);
+    setMousePosition(e);
+    if (moving) move(e);
+    else if (drawing) draw(e);
+    oldPageX = e.pageX;
+    oldPageY = e.pageY;
+});
+
+document.addEventListener('mouseup', e => {
+    switch (e.button) {
+        case 0: // left click
+            drawing = false;
+            break;
+        case 1: // wheel click
+            moving = false;
+            break;
+    }
+});
+
+frameCanvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    
+    /**
+     * m = mouse, p = page, f = frame, s = scale, r = rate
+     * m = p * s + f
+     * f = m - p * s
+     * f' = f + m - p * r * s - f
+     *    = f += m - p * r * s - m + p * s
+     *    = f += p * s * (1 - r)
+     */
+    
+    let rate = e.deltaY < 0 ? 0.8 : 1.25; // zoom in : out
+    frameX += e.pageX * scale * (1 - rate);
+    frameY += e.pageY * scale * (1 - rate);
+    scale *= rate;
+    
+    print();
+});
+
+// debug
+function updateDebugInfo(e) {
     debugInfo.innerHTML = `
         pageX: ${e.pageX}<br>
         pageY: ${e.pageY}<br>
@@ -71,7 +123,11 @@ document.addEventListener('mousemove', e => {
         mouseY: ${mouseY}<br>
         frameX: ${frameX}<br>
         frameY: ${frameY}<br>
+        scale: ${scale}<br>
     `;
-});
+}
 
-document.body.appendChild(imageCanvas);
+// document.addEventListener('mousemove', updateDebugInfo);
+// document.addEventListener('wheel', updateDebugInfo);
+
+// document.body.appendChild(imageCanvas);
