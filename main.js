@@ -11,141 +11,121 @@
  * expand
  */
 
-let imageCanvas = document.createElement('canvas');
-let imageContext = imageCanvas.getContext('2d');
-imageCanvas.width = 1920;
-imageCanvas.height = 1080;
-imageContext.lineWidth = 3;
-imageContext.lineCap = 'round';
-imageContext.lineJoin = 'round';
+let image = document.getElementById('image');
+let context = image.getContext('2d');
+image.width = 1920;
+image.height = 1080;
+context.lineWidth = 3;
+context.lineCap = 'round';
+context.lineJoin = 'round';
 
-let frameCanvas = document.querySelector('canvas');
-let frameContext = frameCanvas.getContext('2d');
-frameCanvas.width = window.innerWidth;
-frameCanvas.height = window.innerHeight;
+let body = document.body;
 
-let scale =  imageCanvas.width / frameCanvas.width;
+let scale = image.width / window.innerWidth;
+let imageStyleWidth = window.innerWidth;
+image.style.width = imageStyleWidth + 'px';
 
-let mousePressing = [false, false, false]; // left, wheel, right
+let translateX = 0, translateY = 0;
 
-let frameX = 0, frameY = 0; // frame in image
-let oldPageX, oldPageY;
+let oldClientX, oldClientY;
 let mouseX, mouseY; // mouse in image
 
-print();
-
-/**
- * @param {Event} e
- */
+/** @param {MouseEvent} e */
 function setMousePosition(e) {
-    mouseX = e.pageX * scale + frameX;
-    mouseY = e.pageY * scale + frameY;
+    mouseX = (e.clientX - translateX) * scale;
+    mouseY = (e.clientY - translateY) * scale;
 }
 
-function print() {
-    frameContext.clearRect(0, 0, frameCanvas.width, frameCanvas.height);
-    frameContext.fillStyle = '#00000008';
-    frameContext.fillRect(-frameX / scale, -frameY / scale, imageCanvas.width / scale, imageCanvas.height / scale);
-    frameContext.drawImage(imageCanvas,
-        frameX, frameY, frameCanvas.width * scale, frameCanvas.height * scale,
-        0, 0, frameCanvas.width, frameCanvas.height
-    );
+function setTransform() {
+    image.style.transform = `translate(${translateX}, ${translateY}) scale(${scale})`;
 }
 
 function draw() {
-    imageContext.lineTo(mouseX, mouseY);
-    imageContext.stroke();
-    print();
+    context.lineTo(mouseX, mouseY);
+    context.stroke();
 }
 
-/**
- * @param {Event} e
- */
+/** @param {MouseEvent} e */
 function move(e) {
-    frameX += (oldPageX - e.pageX) * scale;
-    frameY += (oldPageY - e.pageY) * scale;
-    print();
+    translateX += e.clientX - oldClientX;
+    translateY += e.clientY - oldClientY;
+    image.style.left = translateX + 'px';
+    image.style.top = translateY + 'px';
 }
 
 /**
- * @param {Event} e
+ * @param {WheelEvent} e
  * 
  * formula: {@link setMousePosition}
  * ```math
- * m = mouse, p = page, f = frame, s = scale  
- * m = p * s + f  
- * f = m - p * s
+ * m = mouse, c = client, o = image.offset, s = scale
+ * m = (c - o) * s
+ * o = c - m / s
  * ```
  */
 function wheelZoom(e) {
-    scale *= e.deltaY < 0 ? 0.8 : 1.25; // zoom in : out
-    frameX = mouseX - e.pageX * scale;
-    frameY = mouseY - e.pageY * scale;
-    print();
+    scale *= e.deltaY < 0 ? 0.8 : 1.25; // zoom in : out\
+    imageStyleWidth = image.width / scale;
+    translateX = e.clientX - mouseX / scale;
+    translateY = e.clientY - mouseY / scale;
+    image.style.width = imageStyleWidth + 'px';
+    image.style.left = translateX + 'px';
+    image.style.top = translateY + 'px';
 }
 
 /**
- * @param {Event} e 
+ * @param {MouseEvent} e
  * 
  * fix at center
  */
 function mouseZoom(e) {
-    let rate = Math.pow(1.005, oldPageY - e.pageY);
-    frameX += frameCanvas.width / 2 * scale * (1 - rate);
-    frameY += frameCanvas.height / 2 * scale * (1 - rate);
-    scale *= rate;
-    print();
+    let rate = 1.005 ** (oldClientY - e.clientY);
+    translateX += (1 - rate) * (window.innerWidth / 2 - translateX);
+    translateY += (1 - rate) * (window.innerHeight / 2 - translateY);
+    scale /= rate;
+    imageStyleWidth = image.width / scale;
+    image.style.width = imageStyleWidth + 'px';
+    image.style.left = translateX + 'px';
+    image.style.top = translateY + 'px';
 }
 
 document.addEventListener('mousedown', e => {
     if (e.button == 1) e.preventDefault();
     
     if (e.button == 0) {
-        imageContext.beginPath();
-        imageContext.moveTo(mouseX, mouseY);
+        context.beginPath();
+        context.moveTo(mouseX, mouseY);
     }
-    
-    mousePressing[e.button] = true;
+});
+
+document.addEventListener('mouseup', e => {
 });
 
 document.addEventListener('mousemove', e => {
     setMousePosition(e);
     
-    if (mousePressing[1] || (e.altKey && mousePressing[0])) {
+    if (e.buttons & 4 || (e.altKey && e.buttons & 1)) { // middle or ctrl+left
         move(e);
-    } else if (e.ctrlKey && mousePressing[0]) {
+    } else if (e.ctrlKey && e.buttons & 1) { // ctrl+left
         mouseZoom(e);
-    } else if (mousePressing[0]) {
+    } else if (e.buttons & 1) { // left
         draw();
     }
     
-    oldPageX = e.pageX;
-    oldPageY = e.pageY;
-});
-
-document.addEventListener('mouseup', e => {
-    mousePressing[e.button] = false;
+    oldClientX = e.clientX;
+    oldClientY = e.clientY;
 });
 
 document.addEventListener('keydown', e => {
-    
 });
 
 document.addEventListener('keyup', e => {
-    
 });
 
-frameCanvas.addEventListener('wheel', e => {
+document.addEventListener('wheel', e => {
     e.preventDefault();
-    
     wheelZoom(e);
-});
-
-window.addEventListener('resize', () => {
-    frameCanvas.width = window.innerWidth;
-    frameCanvas.height = window.innerHeight;
-    print();
-});
+}, { passive: false });
 
 
 
@@ -154,19 +134,20 @@ let debugInfo = document.getElementById('debug');
 
 function updateDebugInfo(e) {
     debugInfo.innerHTML = `
-        pageX: ${e.pageX}<br>
-        pageY: ${e.pageY}<br>
         clientX: ${e.clientX}<br>
         clientY: ${e.clientY}<br>
         mouseX: ${mouseX}<br>
         mouseY: ${mouseY}<br>
-        frameX: ${frameX}<br>
-        frameY: ${frameY}<br>
+        image.offsetLeft: ${image.offsetLeft}<br>
+        image.offsetTop: ${image.offsetTop}<br>
         scale: ${scale}<br>
+        imageStyleWidth: ${imageStyleWidth}<br>
+        imageStyleLeft: ${translateX}<br>
+        imageStyleTop: ${translateY}<br>
+        window.innerWidth: ${window.innerWidth / 2}<br>
+        top left to center: ${window.innerWidth / 2 - translateX}<br>
     `;
 }
 
-// document.addEventListener('mousemove', updateDebugInfo);
-// document.addEventListener('wheel', updateDebugInfo);
-
-// document.body.appendChild(imageCanvas);
+document.addEventListener('mousemove', updateDebugInfo);
+document.addEventListener('wheel', updateDebugInfo);

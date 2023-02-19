@@ -1,14 +1,17 @@
 <!DOCTYPE html>
+<html>
   <head>
     <meta charset="UTF-8">
     <title>paint</title>
     <style>
       body {
         margin: 0;
-        /* background-color: black; */
+        overflow: hidden;
       }
-      body::-webkit-scrollbar {
-        display: none;
+      canvas {
+        background-color: #00000011;
+        position: absolute;
+        transform-origin: 0 0;
       }
       #debug {
         position: fixed;
@@ -19,8 +22,8 @@
     </style>
   </head>
   <body>
-    <canvas></canvas>
-    <!-- <div id="debug"></div> -->
+    <canvas id="image"></canvas>
+    <div id="debug"></div>
     <script src="main.js"></script>
   </body>
 </html>
