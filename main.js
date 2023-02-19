@@ -21,23 +21,23 @@ context.lineJoin = 'round';
 
 let body = document.body;
 
-let scale = image.width / window.innerWidth;
-let imageStyleWidth = window.innerWidth;
-image.style.width = imageStyleWidth + 'px';
+let scale = window.innerWidth / image.width;
 
 let translateX = 0, translateY = 0;
 
 let oldClientX, oldClientY;
 let mouseX, mouseY; // mouse in image
 
+setTransform();
+
 /** @param {MouseEvent} e */
-function setMousePosition(e) {
-    mouseX = (e.clientX - translateX) * scale;
-    mouseY = (e.clientY - translateY) * scale;
+function setMouse(e) {
+    mouseX = (e.clientX - translateX) / scale;
+    mouseY = (e.clientY - translateY) / scale;
 }
 
 function setTransform() {
-    image.style.transform = `translate(${translateX}, ${translateY}) scale(${scale})`;
+    image.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
 }
 
 function draw() {
@@ -49,14 +49,13 @@ function draw() {
 function move(e) {
     translateX += e.clientX - oldClientX;
     translateY += e.clientY - oldClientY;
-    image.style.left = translateX + 'px';
-    image.style.top = translateY + 'px';
+    setTransform();
 }
 
 /**
  * @param {WheelEvent} e
  * 
- * formula: {@link setMousePosition}
+ * formula: {@link setMouse}
  * ```math
  * m = mouse, c = client, o = image.offset, s = scale
  * m = (c - o) * s
@@ -64,13 +63,10 @@ function move(e) {
  * ```
  */
 function wheelZoom(e) {
-    scale *= e.deltaY < 0 ? 0.8 : 1.25; // zoom in : out\
-    imageStyleWidth = image.width / scale;
-    translateX = e.clientX - mouseX / scale;
-    translateY = e.clientY - mouseY / scale;
-    image.style.width = imageStyleWidth + 'px';
-    image.style.left = translateX + 'px';
-    image.style.top = translateY + 'px';
+    scale *= e.deltaY < 0 ? 1.25 : 0.8; // zoom in : out\
+    translateX = e.clientX - mouseX * scale;
+    translateY = e.clientY - mouseY * scale;
+    setTransform();
 }
 
 /**
@@ -80,13 +76,10 @@ function wheelZoom(e) {
  */
 function mouseZoom(e) {
     let rate = 1.005 ** (oldClientY - e.clientY);
-    translateX += (1 - rate) * (window.innerWidth / 2 - translateX);
-    translateY += (1 - rate) * (window.innerHeight / 2 - translateY);
+    translateX += (rate - 1) * (window.innerWidth / 2 - translateX);
+    translateY += (rate - 1) * (window.innerHeight / 2 - translateY);
     scale /= rate;
-    imageStyleWidth = image.width / scale;
-    image.style.width = imageStyleWidth + 'px';
-    image.style.left = translateX + 'px';
-    image.style.top = translateY + 'px';
+    setTransform();
 }
 
 document.addEventListener('mousedown', e => {
@@ -102,7 +95,7 @@ document.addEventListener('mouseup', e => {
 });
 
 document.addEventListener('mousemove', e => {
-    setMousePosition(e);
+    setMouse(e);
     
     if (e.buttons & 4 || (e.altKey && e.buttons & 1)) { // middle or ctrl+left
         move(e);
@@ -141,13 +134,11 @@ function updateDebugInfo(e) {
         image.offsetLeft: ${image.offsetLeft}<br>
         image.offsetTop: ${image.offsetTop}<br>
         scale: ${scale}<br>
-        imageStyleWidth: ${imageStyleWidth}<br>
-        imageStyleLeft: ${translateX}<br>
-        imageStyleTop: ${translateY}<br>
-        window.innerWidth: ${window.innerWidth / 2}<br>
-        top left to center: ${window.innerWidth / 2 - translateX}<br>
+        translateX: ${translateX}<br>
+        translateY: ${translateY}<br>
+        transform: ${image.style.transform}<br>
     `;
 }
 
-document.addEventListener('mousemove', updateDebugInfo);
-document.addEventListener('wheel', updateDebugInfo);
+// document.addEventListener('mousemove', updateDebugInfo);
+// document.addEventListener('wheel', updateDebugInfo);
