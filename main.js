@@ -11,22 +11,25 @@
  * expand
  */
 
-let image = document.getElementById('image');
-let context = image.getContext('2d');
+const image = document.getElementById('image');
+const context = image.getContext('2d');
 image.width = 1920;
 image.height = 1080;
 context.lineWidth = 3;
 context.lineCap = 'round';
 context.lineJoin = 'round';
 
-let body = document.body;
+const body = document.body;
 
+/** {@link setTransform} */
 let scale = window.innerWidth / image.width;
-
 let translateX = 0, translateY = 0;
 
-let oldClientX, oldClientY;
-let mouseX, mouseY; // mouse in image
+let oldClientX = window.innerWidth / 2, oldClientY = image.height * scale / 2;
+let mouseX = image.width / 2, mouseY = image.height / 2; // mouse in image
+
+const record = [];
+let points = [], redo = [];
 
 setTransform();
 
@@ -40,16 +43,16 @@ function setTransform() {
     image.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
 }
 
-function draw() {
-    context.lineTo(mouseX, mouseY);
+function refresh() {
+    context.clearRect(0, 0, image.width, image.height);
+    context.beginPath();
+    for (let command of record) {
+        context.moveTo(command[0].x, command[0].y);
+        for (let point of command) {
+            context.lineTo(point.x, point.y);
+        }
+    }
     context.stroke();
-}
-
-/** @param {MouseEvent} e */
-function move(e) {
-    translateX += e.clientX - oldClientX;
-    translateY += e.clientY - oldClientY;
-    setTransform();
 }
 
 /**
@@ -83,11 +86,16 @@ function mouseZoom(e) {
 }
 
 document.addEventListener('mousedown', e => {
-    if (e.button == 1) e.preventDefault();
+    if (e.button === 1) e.preventDefault();
     
-    if (e.button == 0) {
-        context.beginPath();
-        context.moveTo(mouseX, mouseY);
+    if (e.button === 0) {
+        points = [];
+        record.push(points);
+        redo = [];
+        points.push({
+            x: mouseX,
+            y: mouseY
+        });
     }
 });
 
@@ -98,11 +106,20 @@ document.addEventListener('mousemove', e => {
     setMouse(e);
     
     if (e.buttons & 4 || (e.altKey && e.buttons & 1)) { // middle or ctrl+left
-        move(e);
+        // drag
+        translateX += e.clientX - oldClientX;
+        translateY += e.clientY - oldClientY;
+        setTransform();
     } else if (e.ctrlKey && e.buttons & 1) { // ctrl+left
+        // zoom
         mouseZoom(e);
     } else if (e.buttons & 1) { // left
-        draw();
+        // draw
+        points.push({
+            x: mouseX,
+            y: mouseY
+        });
+        refresh();
     }
     
     oldClientX = e.clientX;
@@ -110,6 +127,14 @@ document.addEventListener('mousemove', e => {
 });
 
 document.addEventListener('keydown', e => {
+    if (e.ctrlKey && e.code === 'KeyZ') {
+        if (e.shiftKey) {
+            if (redo.length) record.push(redo.pop());
+        } else {
+            if (record.length) redo.push(record.pop());
+        }
+        refresh();
+    }
 });
 
 document.addEventListener('keyup', e => {
@@ -131,14 +156,14 @@ function updateDebugInfo(e) {
         clientY: ${e.clientY}<br>
         mouseX: ${mouseX}<br>
         mouseY: ${mouseY}<br>
-        image.offsetLeft: ${image.offsetLeft}<br>
-        image.offsetTop: ${image.offsetTop}<br>
         scale: ${scale}<br>
         translateX: ${translateX}<br>
         translateY: ${translateY}<br>
-        transform: ${image.style.transform}<br>
+        points.length ${points.length}<br>
+        record.length: ${record.length}<br>
+        redo.length: ${redo.length}<br>
     `;
 }
 
-// document.addEventListener('mousemove', updateDebugInfo);
-// document.addEventListener('wheel', updateDebugInfo);
+document.addEventListener('mousemove', updateDebugInfo);
+document.addEventListener('wheel', updateDebugInfo);
