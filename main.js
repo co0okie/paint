@@ -11,25 +11,37 @@
  * expand
  */
 
-const image = document.getElementById('image');
-const context = image.getContext('2d');
-image.width = 1920;
-image.height = 1080;
-context.lineWidth = 3;
+const paper = document.getElementById('paper');
+const context = paper.getContext('2d');
+paper.width = 10000;
+paper.height = 10000;
+context.lineWidth = 1;
 context.lineCap = 'round';
 context.lineJoin = 'round';
 
 const body = document.body;
 
 /** {@link setTransform} */
-let scale = window.innerWidth / image.width;
+let scale = window.innerWidth / paper.width;
+let initScale = scale;
 let translateX = 0, translateY = 0;
 
-let oldClientX = window.innerWidth / 2, oldClientY = image.height * scale / 2;
-let mouseX = image.width / 2, mouseY = image.height / 2; // mouse in image
+let oldClientX = window.innerWidth / 2, oldClientY = paper.height * scale / 2;
+let mouseX = paper.width / 2, mouseY = paper.height / 2; // mouse in image
 
 const record = [];
 let points = [], redo = [];
+
+let exceedPaper = true;
+
+/**
+ * 0: nothing  
+ * 1: drawing  
+ * 2: moving  
+ * 3: zooming  
+ */
+let action = 0;
+const ACTION_TEXT = ['nothing', 'drawing', 'moving', 'zooming'];
 
 setTransform();
 
@@ -40,11 +52,15 @@ function setMouse(e) {
 }
 
 function setTransform() {
-    image.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+    if (!exceedPaper) {
+        if (scale < initScale) scale = initScale;
+        if (translateX > 0) translateX = 0;
+    }
+    paper.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
 }
 
 function refresh() {
-    context.clearRect(0, 0, image.width, image.height);
+    context.clearRect(0, 0, paper.width, paper.height);
     context.beginPath();
     for (let command of record) {
         context.moveTo(command[0].x, command[0].y);
@@ -66,7 +82,7 @@ function refresh() {
  * ```
  */
 function wheelZoom(e) {
-    scale *= e.deltaY < 0 ? 1.25 : 0.8; // zoom in : out\
+    scale *= e.deltaY < 0 ? 1.25 : 0.8;
     translateX = e.clientX - mouseX * scale;
     translateY = e.clientY - mouseY * scale;
     setTransform();
@@ -88,6 +104,16 @@ function mouseZoom(e) {
 document.addEventListener('mousedown', e => {
     if (e.button === 1) e.preventDefault();
     
+    if (action === 0) {
+        if (e.altKey && e.button === 0 || e.button === 1) {
+            action = 2; // moving
+        } else if (e.ctrlKey && e.button === 0) {
+            action = 3; // zooming
+        } else if (e.button === 0) {
+            action = 1; // drawing
+        }
+    }
+    
     if (e.button === 0) {
         points = [];
         record.push(points);
@@ -100,26 +126,28 @@ document.addEventListener('mousedown', e => {
 });
 
 document.addEventListener('mouseup', e => {
+    action = 0;
 });
 
 document.addEventListener('mousemove', e => {
     setMouse(e);
     
-    if (e.buttons & 4 || (e.altKey && e.buttons & 1)) { // middle or ctrl+left
-        // drag
-        translateX += e.clientX - oldClientX;
-        translateY += e.clientY - oldClientY;
-        setTransform();
-    } else if (e.ctrlKey && e.buttons & 1) { // ctrl+left
-        // zoom
-        mouseZoom(e);
-    } else if (e.buttons & 1) { // left
-        // draw
+    switch (action) {
+    case 1: // draw
         points.push({
             x: mouseX,
             y: mouseY
         });
         refresh();
+        break;
+    case 2: // move
+        translateX += e.clientX - oldClientX;
+        translateY += e.clientY - oldClientY;
+        setTransform();
+        break;
+    case 3: // zoom
+        mouseZoom(e);
+        break;
     }
     
     oldClientX = e.clientX;
@@ -138,6 +166,10 @@ document.addEventListener('keydown', e => {
 });
 
 document.addEventListener('keyup', e => {
+    if (e.code === 'KeyL') {
+        exceedPaper = !exceedPaper;
+        setTransform();
+    }
 });
 
 document.addEventListener('wheel', e => {
@@ -152,6 +184,8 @@ let debugInfo = document.getElementById('debug');
 
 function updateDebugInfo(e) {
     debugInfo.innerHTML = `
+        pageX: ${e.pageX}<br>
+        pageY: ${e.pageY}<br>
         clientX: ${e.clientX}<br>
         clientY: ${e.clientY}<br>
         mouseX: ${mouseX}<br>
@@ -162,6 +196,9 @@ function updateDebugInfo(e) {
         points.length ${points.length}<br>
         record.length: ${record.length}<br>
         redo.length: ${redo.length}<br>
+        action: ${ACTION_TEXT[action]}<br>
+        transform: ${paper.style.transform}<br>
+        top: ${paper.offsetTop}
     `;
 }
 

@@ -4,26 +4,31 @@
     <meta charset="UTF-8">
     <title>paint</title>
     <style>
+      html {
+        height: 100%;
+      }
       body {
+        height: 100%;
         margin: 0;
-        overflow: hidden;
+        /* overflow: hidden; */
       }
       canvas {
         background-color: #00000011;
-        /* position: absolute; */
         transform-origin: 0 0;
+        position: fixed;
+        image-rendering: pixelated;
       }
       #debug {
         position: fixed;
         top: 0;
         right: 0;
-        font-size: 2vw;
+        font-size: 2vh;
       }
     </style>
   </head>
   <body>
-    <canvas id="image"></canvas>
+    <canvas id="paper"></canvas>
     <div id="debug"></div>
-    <script src="main.js"></script>
   </body>
 </html>
+<script src="main.js"></script>
