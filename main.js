@@ -11,28 +11,31 @@
  * expand
  */
 
-const paper = document.getElementById('paper');
-const context = paper.getContext('2d');
-paper.width = 10000;
-paper.height = 10000;
-context.lineWidth = 1;
+const canvas = document.querySelector('canvas');
+const context = canvas.getContext('2d');
+canvas.width = 1920;
+canvas.height = 10800;
+context.lineWidth = 3;
 context.lineCap = 'round';
 context.lineJoin = 'round';
+context.strokeStyle = 'white';
 
 const body = document.body;
 
 /** {@link setTransform} */
-let scale = window.innerWidth / paper.width;
+let scale = window.innerWidth / canvas.width;
 let initScale = scale;
 let translateX = 0, translateY = 0;
 
-let oldClientX = window.innerWidth / 2, oldClientY = paper.height * scale / 2;
-let mouseX = paper.width / 2, mouseY = paper.height / 2; // mouse in image
+let oldClientX, oldClientY;
+let mouseX, mouseY; // mouse in image
 
-const record = [];
-let points = [], redo = [];
+const commands = [];
+let command = [], redo = [];
 
-let exceedPaper = true;
+const setting = {
+    exceedPaper: true
+};
 
 /**
  * 0: nothing  
@@ -52,17 +55,27 @@ function setMouse(e) {
 }
 
 function setTransform() {
-    if (!exceedPaper) {
-        if (scale < initScale) scale = initScale;
-        if (translateX > 0) translateX = 0;
+    if (!setting.exceedPaper) {
+        if (scale < initScale) {
+            scale = initScale;
+            translateY = parseInt(canvas.style.top, 10);
+        }
+        if (translateX > 0) {
+            translateX = 0;
+        }
+        if (translateX < window.innerWidth - canvas.offsetWidth) {
+            translateX = window.innerWidth - canvas.offsetWidth;
+        }
     }
-    paper.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+    canvas.style.width = canvas.width * scale + 'px';
+    canvas.style.left = translateX + 'px';
+    canvas.style.top = translateY + 'px';
 }
 
 function refresh() {
-    context.clearRect(0, 0, paper.width, paper.height);
+    context.clearRect(0, 0, canvas.width, canvas.height);
     context.beginPath();
-    for (let command of record) {
+    for (let command of commands) {
         context.moveTo(command[0].x, command[0].y);
         for (let point of command) {
             context.lineTo(point.x, point.y);
@@ -72,14 +85,13 @@ function refresh() {
 }
 
 /**
- * @param {WheelEvent} e
- * 
  * formula: {@link setMouse}
  * ```math
- * m = mouse, c = client, o = image.offset, s = scale
- * m = (c - o) * s
- * o = c - m / s
+ * m = mouse, c = client, t = translate, s = scale
+ * m = (c - t) * s
+ * t = c - m / s
  * ```
+ * @param {WheelEvent} e
  */
 function wheelZoom(e) {
     scale *= e.deltaY < 0 ? 1.25 : 0.8;
@@ -88,20 +100,27 @@ function wheelZoom(e) {
     setTransform();
 }
 
-/**
+/** fix at center  
+ * w = window, t = translate, s = scale, c = center
+ * ```math
+ * (w / 2 - t) / s = c
+ * t = w / 2 - s * c
+ * t' = w / 2 - r * s * c
+ *    = w / 2 - r * s * (w / 2 - t) / s
+ *    = t + (1 - r) * (w / 2 - t)
+ * ```
  * @param {MouseEvent} e
- * 
- * fix at center
  */
 function mouseZoom(e) {
-    let rate = 1.005 ** (oldClientY - e.clientY);
-    translateX += (rate - 1) * (window.innerWidth / 2 - translateX);
-    translateY += (rate - 1) * (window.innerHeight / 2 - translateY);
-    scale /= rate;
+    let rate = 1.005 ** (e.clientY - oldClientY);
+    scale *= rate;
+    translateX += (1 - rate) * (window.innerWidth / 2 - translateX);
+    translateY += (1 - rate) * (window.innerHeight / 2 - translateY);
     setTransform();
 }
 
-document.addEventListener('mousedown', e => {
+/** @param {MouseEvent} e */
+function onMouseDown(e) {
     if (e.button === 1) e.preventDefault();
     
     if (action === 0) {
@@ -111,30 +130,29 @@ document.addEventListener('mousedown', e => {
             action = 3; // zooming
         } else if (e.button === 0) {
             action = 1; // drawing
+            command = [];
+            commands.push(command);
+            redo = [];
+            command.push({
+                x: mouseX,
+                y: mouseY
+            });
         }
     }
-    
-    if (e.button === 0) {
-        points = [];
-        record.push(points);
-        redo = [];
-        points.push({
-            x: mouseX,
-            y: mouseY
-        });
-    }
-});
+}
 
-document.addEventListener('mouseup', e => {
+/** @param {MouseEvent} e */
+function onMouseUp(e) {
     action = 0;
-});
+}
 
-document.addEventListener('mousemove', e => {
+/** @param {MouseEvent} e */
+function onMouseMove(e) {
     setMouse(e);
     
     switch (action) {
     case 1: // draw
-        points.push({
+        command.push({
             x: mouseX,
             y: mouseY
         });
@@ -152,32 +170,49 @@ document.addEventListener('mousemove', e => {
     
     oldClientX = e.clientX;
     oldClientY = e.clientY;
-});
+}
 
-document.addEventListener('keydown', e => {
+/** @param {KeyboardEvent} e */
+function onKeyDown(e) {
     if (e.ctrlKey && e.code === 'KeyZ') {
         if (e.shiftKey) {
-            if (redo.length) record.push(redo.pop());
+            if (redo.length) commands.push(redo.pop());
         } else {
-            if (record.length) redo.push(record.pop());
+            if (commands.length) redo.push(commands.pop());
         }
         refresh();
     }
-});
+}
 
-document.addEventListener('keyup', e => {
+/** @param {KeyboardEvent} e */
+function onKeyUp(e) {
     if (e.code === 'KeyL') {
-        exceedPaper = !exceedPaper;
+        setting.exceedPaper = !setting.exceedPaper;
         setTransform();
     }
-});
+    if (e.ctrlKey && e.code === 'KeyC') {
+        canvas.toBlob(blob => navigator.clipboard.write([new ClipboardItem({[blob.type]: blob})]));
+    }
+}
 
-document.addEventListener('wheel', e => {
+/** @param {WheelEvent} e */
+function onWheel(e) {
     e.preventDefault();
     wheelZoom(e);
-}, { passive: false });
+}
 
-
+document.addEventListener('mousemove', e => {
+    setMouse(e);
+    oldClientX = e.clientX;
+    oldClientY = e.clientY;
+    
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('mouseup', onMouseUp);
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
+    document.addEventListener('wheel', onWheel, { passive: false });
+}, { once: true });
 
 // debug
 let debugInfo = document.getElementById('debug');
@@ -193,12 +228,14 @@ function updateDebugInfo(e) {
         scale: ${scale}<br>
         translateX: ${translateX}<br>
         translateY: ${translateY}<br>
-        points.length ${points.length}<br>
-        record.length: ${record.length}<br>
+        points.length ${command.length}<br>
+        record.length: ${commands.length}<br>
         redo.length: ${redo.length}<br>
         action: ${ACTION_TEXT[action]}<br>
-        transform: ${paper.style.transform}<br>
-        top: ${paper.offsetTop}
+        transform: ${canvas.style.transform}<br>
+        canvas.offsetWidth: ${canvas.offsetWidth}<br>
+        translateX + canvas.offsetWidth: ${translateX + canvas.offsetWidth}<br>
+        window.innerWidth: ${window.innerWidth}<br>
     `;
 }
 
