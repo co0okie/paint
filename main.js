@@ -34,7 +34,7 @@ const commands = [];
 let command = [], redo = [];
 
 const setting = {
-    exceedPaper: true
+    stayInPage: false
 };
 
 /**
@@ -55,19 +55,13 @@ function setMouse(e) {
 }
 
 function setTransform() {
-    if (!setting.exceedPaper) {
-        if (scale < initScale) {
-            scale = initScale;
-            translateY = parseInt(canvas.style.top, 10);
-        }
-        if (translateX > 0) {
-            translateX = 0;
-        }
-        if (translateX < window.innerWidth - canvas.offsetWidth) {
-            translateX = window.innerWidth - canvas.offsetWidth;
-        }
-    }
+    if (setting.stayInPage && scale < initScale) scale = initScale;
     canvas.style.width = canvas.width * scale + 'px';
+    if (setting.stayInPage) {
+        if (translateX > 0) translateX = 0;
+        let rightLimit = window.innerWidth - canvas.offsetWidth;
+        if (translateX < rightLimit) translateX = rightLimit;
+    }
     canvas.style.left = translateX + 'px';
     canvas.style.top = translateY + 'px';
 }
@@ -95,6 +89,7 @@ function refresh() {
  */
 function wheelZoom(e) {
     scale *= e.deltaY < 0 ? 1.25 : 0.8;
+    if (setting.stayInPage && scale < initScale) scale = initScale;
     translateX = e.clientX - mouseX * scale;
     translateY = e.clientY - mouseY * scale;
     setTransform();
@@ -114,6 +109,7 @@ function wheelZoom(e) {
 function mouseZoom(e) {
     let rate = 1.005 ** (e.clientY - oldClientY);
     scale *= rate;
+    if (setting.stayInPage && scale < initScale) scale = initScale;
     translateX += (1 - rate) * (window.innerWidth / 2 - translateX);
     translateY += (1 - rate) * (window.innerHeight / 2 - translateY);
     setTransform();
@@ -187,7 +183,7 @@ function onKeyDown(e) {
 /** @param {KeyboardEvent} e */
 function onKeyUp(e) {
     if (e.code === 'KeyL') {
-        setting.exceedPaper = !setting.exceedPaper;
+        setting.stayInPage = !setting.stayInPage;
         setTransform();
     }
     if (e.ctrlKey && e.code === 'KeyC') {
@@ -201,6 +197,11 @@ function onWheel(e) {
     wheelZoom(e);
 }
 
+function onResize() {
+    initScale = window.innerWidth / canvas.width;
+    setTransform();
+}
+
 document.addEventListener('mousemove', e => {
     setMouse(e);
     oldClientX = e.clientX;
@@ -212,6 +213,7 @@ document.addEventListener('mousemove', e => {
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
     document.addEventListener('wheel', onWheel, { passive: false });
+    window.addEventListener('resize', onResize);
 }, { once: true });
 
 // debug
