@@ -4,13 +4,16 @@
     <meta charset="UTF-8">
     <title>paint</title>
     <style>
+      html, body {
+        height: 100%;
+      }
       body {
         margin: 0;
         overflow: hidden;
         background-color: #000;
       }
-      canvas {
-        background-color: #111;
+      #main {
+        background-color: #222;
         transform-origin: 0 0;
         position: fixed;
         image-rendering: pixelated;
@@ -21,11 +24,12 @@
         right: 0;
         font-size: 2vh;
         color: white;
+        user-select: none;
       }
     </style>
   </head>
   <body>
-    <canvas></canvas>
+    <canvas id="main"></canvas>
     <div id="debug"></div>
   </body>
 </html>

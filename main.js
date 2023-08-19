@@ -11,7 +11,7 @@
  * expand
  */
 
-const canvas = document.querySelector('canvas');
+const canvas = document.getElementById('main');
 const context = canvas.getContext('2d');
 canvas.width = 1920;
 canvas.height = 10800;
@@ -108,8 +108,12 @@ function wheelZoom(e) {
  */
 function mouseZoom(e) {
     let rate = 1.005 ** (e.clientY - oldClientY);
-    scale *= rate;
-    if (setting.stayInPage && scale < initScale) scale = initScale;
+    let newScale = scale * rate;
+    if (setting.stayInPage && newScale < initScale) {
+        rate = initScale / scale;
+        newScale = initScale;
+    }
+    scale = newScale;
     translateX += (1 - rate) * (window.innerWidth / 2 - translateX);
     translateY += (1 - rate) * (window.innerHeight / 2 - translateY);
     setTransform();
@@ -241,5 +245,5 @@ function updateDebugInfo(e) {
     `;
 }
 
-document.addEventListener('mousemove', updateDebugInfo);
-document.addEventListener('wheel', updateDebugInfo);
+// document.addEventListener('mousemove', updateDebugInfo);
+// document.addEventListener('wheel', updateDebugInfo);
