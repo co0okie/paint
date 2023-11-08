@@ -21,7 +21,7 @@ let context = canvas.getContext('2d');
 context.lineWidth = 3;
 context.lineCap = 'round';
 context.lineJoin = 'round';
-context.strokeStyle = DEBUG ? 'red' : 'white';
+context.strokeStyle = 'white';
 
 const screenCanvas = document.getElementById('screen');
 screenCanvas.width = window.innerWidth;
@@ -201,6 +201,11 @@ function toOrigin(x, y) {
 
 // origin coordinate
 function draw(path, bound) {
+    bound.left -= 10;
+    bound.right += 10;
+    bound.top -= 10;
+    bound.bottom += 10;
+    
     // first draw
     if (canvasBound === undefined) {
         canvasBound = bound;
