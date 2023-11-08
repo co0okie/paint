@@ -1,18 +1,27 @@
 const DEBUG = 1;
 
+// O = window top left, screen coordinate
+const origin = {
+    x: window.innerWidth / 2, 
+    y: window.innerHeight / 2
+};
+
+// origin coordinate * scaleRate = screen cooridinate
+let scaleRate = 1;
+
 let canvas = document.getElementById('main');
 canvas.width = 0;
 canvas.height = 0;
 if (DEBUG) canvas.style.backgroundColor = '#222';
 
+// O = origin, origin coordinate
+let canvasBound;
+
 let context = canvas.getContext('2d');
 context.lineWidth = 3;
 context.lineCap = 'round';
 context.lineJoin = 'round';
-context.strokeStyle = 'white';
-
-// origin coordinate * scaleRate = screen cooridinate
-let scaleRate = 1;
+context.strokeStyle = DEBUG ? 'red' : 'white';
 
 const screenCanvas = document.getElementById('screen');
 screenCanvas.width = window.innerWidth;
@@ -22,16 +31,15 @@ screenCanvas.style.height = `${window.innerHeight}px`;
 screenCanvas.style.left = '0px';
 screenCanvas.style.top = '0px';
 
+// O = origin, origin coordinate
+let screenCanvasBound = {left: -Math.ceil(origin.x), top: -Math.ceil(origin.y)};
+
 const screenContext = screenCanvas.getContext('2d');
 screenContext.lineWidth = context.lineWidth;
-screenContext.strokeStyle = context.strokeStyle;
+screenContext.strokeStyle = DEBUG ? 'blue' : context.strokeStyle;
 screenContext.lineCap = 'round';
 screenContext.lineJoin = 'round';
-
-// O = window top left, screen coordinate
-const origin = {x: window.innerWidth / 2, y: window.innerHeight / 2};
-// O = origin, origin coordinate
-let canvasBound;
+screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
 
 let undoStack = [];
 let redoStack = [];
@@ -100,7 +108,7 @@ window.addEventListener('resize', e => {
     screenCanvas.style.top = `${marginY * scaleRate}px`;
     screenContext.setTransform(1, 0, 0, 1, -marginX, -marginY);
     screenContext.lineWidth = context.lineWidth;
-    screenContext.strokeStyle = context.strokeStyle;
+    screenContext.strokeStyle = DEBUG ? 'blue' : context.strokeStyle;
     screenContext.lineCap = 'round';
     screenContext.lineJoin = 'round';
 })
@@ -116,10 +124,17 @@ function onDrawStart(e) {
     const path = [{x: e.originX, y: e.originY}];
     
     function onDraw(e) {
-        // screenContext.clearRect(0, 0, screenCanvas.width, screenCanvas.height);
+        screenContext.clearRect(
+            screenCanvasBound.left, screenCanvasBound.top,
+            screenCanvas.width, screenCanvas.height
+        );
         screenContext.beginPath();
-        screenContext.moveTo(e.oldClientX / scaleRate, e.oldClientY / scaleRate);
-        screenContext.lineTo(e.clientX / scaleRate, e.clientY / scaleRate);
+        screenContext.moveTo(path[0].x, path[0].y);
+        for (point of path) {
+            screenContext.lineTo(point.x, point.y);
+        }
+        // screenContext.moveTo(e.originX, e.originY);
+        // screenContext.lineTo(e.clientX / scaleRate, e.clientY / scaleRate);
         screenContext.stroke();
         
         if (e.originX < bound.left) bound.left = Math.floor(e.originX);
@@ -139,7 +154,10 @@ function onDrawStart(e) {
         undoStack.push({path: path, bound: canvasBound});
         redoStack = [];
         
-        screenContext.clearRect(0, 0, screenCanvas.width, screenCanvas.height);
+        screenContext.clearRect(
+            screenCanvasBound.left, screenCanvasBound.top,
+            screenCanvas.width, screenCanvas.height
+        );
     }, { once: true });
 }
 
@@ -231,10 +249,12 @@ function scale(rate, x, y) {
     scaleRate *= rate;
     origin.x = x + rate * (origin.x - x);
     origin.y = y + rate * (origin.y - y);
-    canvas.style.left = `${origin.x + canvasBound.left * scaleRate}px`;
-    canvas.style.top  = `${origin.y + canvasBound.top  * scaleRate}px`;
-    canvas.style.width = `${canvas.width * scaleRate}px`;
-    canvas.style.height = `${canvas.height * scaleRate}px`;
+    if (canvasBound) {
+        canvas.style.left = `${origin.x + canvasBound.left * scaleRate}px`;
+        canvas.style.top  = `${origin.y + canvasBound.top  * scaleRate}px`;
+        canvas.style.width = `${canvas.width * scaleRate}px`;
+        canvas.style.height = `${canvas.height * scaleRate}px`;
+    }
     
     screenCanvas.width = Math.ceil(window.innerWidth / scaleRate) + 1;
     screenCanvas.height = Math.ceil(window.innerHeight / scaleRate) + 1;
@@ -242,13 +262,13 @@ function scale(rate, x, y) {
     screenCanvas.style.height = `${screenCanvas.height * scaleRate}px`;
     let blockCountX = origin.x / scaleRate;
     let blockCountY = origin.y / scaleRate;
-    let marginX = blockCountX - Math.ceil(blockCountX);
-    let marginY = blockCountY - Math.ceil(blockCountY);
-    screenCanvas.style.left = `${marginX * scaleRate}px`;
-    screenCanvas.style.top = `${marginY * scaleRate}px`;
-    screenContext.setTransform(1, 0, 0, 1, -marginX, -marginY);
+    screenCanvasBound.left = -Math.ceil(blockCountX);
+    screenCanvasBound.top = -Math.ceil(blockCountY);
+    screenCanvas.style.left = `${(blockCountX + screenCanvasBound.left) * scaleRate}px`;
+    screenCanvas.style.top = `${(blockCountY + screenCanvasBound.top) * scaleRate}px`;
+    screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
     screenContext.lineWidth = context.lineWidth;
-    screenContext.strokeStyle = context.strokeStyle;
+    screenContext.strokeStyle = DEBUG ? 'blue' : context.strokeStyle;
     screenContext.lineCap = 'round';
     screenContext.lineJoin = 'round';
 }
@@ -326,6 +346,8 @@ if (DEBUG) { // debug
             screenCanvas.offsetHeight: ${screenCanvas.offsetHeight}<br>
             screenCanvas.offsetLeft: ${screenCanvas.offsetLeft}<br>
             screenCanvas.offsetTop: ${screenCanvas.offsetTop}<br>
+            screenCanvasBound.left: ${screenCanvasBound.left}<br>
+            screenCanvasBound.top: ${screenCanvasBound.top}<br>
             window.innerWidth: ${window.innerWidth}<br>
             window.innerHeight: ${window.innerHeight}<br>
             undoStack.length: ${undoStack.length}<br>
