@@ -11,6 +11,7 @@
         margin: 0;
         overflow: hidden;
         background-color: #000;
+        /* cursor: none; */
       }
       canvas {
         position: fixed;
@@ -20,6 +21,14 @@
         width: 100%;
         height: 100%;
       } */
+      #cursor {
+        border-radius: 50%;
+        position: fixed;
+        left: -100%;
+        top: -100%;
+        translate: -50% -50%;
+        background-color: white;
+      }
       #debug {
         position: fixed;
         top: 0;
@@ -27,13 +36,15 @@
         font-size: 2vh;
         color: white;
         user-select: none;
+        
       }
     </style>
   </head>
   <body>
-    <canvas id="main"></canvas>
-    <canvas id="screen"></canvas>
-    <div id="debug"></div>
+    <canvas id="main" draggable="false"></canvas>
+    <canvas id="screen" draggable="false"></canvas>
+    <!-- <div id="cursor" draggable="false"></div> -->
+    <div id="debug" draggable="false"></div>
   </body>
 </html>
 <script src="main.js"></script>

@@ -1,4 +1,22 @@
+/*
+reason for using screen canvas:
+    Without screen canvas, in order to achieve infinity bound canvas, the size of main canvas has
+    to be change frequently when user draws out of the bound, and it's impossible that user
+    draws out of the screen, so a screen canvas is the best solution.
+    
+pen =e=> eraser =p=> pen
+*/
+
 const DEBUG = 1;
+
+// mode
+const PEN = 1;
+const ERASER = 2;
+let operationMode = PEN;
+const pen = {
+    lineWidth: 3,
+    strokeStyle: 'white',
+}
 
 // O = window top left, screen coordinate
 const origin = {
@@ -22,6 +40,7 @@ context.lineWidth = 3;
 context.lineCap = 'round';
 context.lineJoin = 'round';
 context.strokeStyle = 'white';
+context.fillStyle = 'white';
 
 const screenCanvas = document.getElementById('screen');
 screenCanvas.width = window.innerWidth;
@@ -37,9 +56,14 @@ let screenCanvasBound = {left: -Math.ceil(origin.x), top: -Math.ceil(origin.y)};
 const screenContext = screenCanvas.getContext('2d');
 screenContext.lineWidth = context.lineWidth;
 screenContext.strokeStyle = DEBUG ? 'cyan' : context.strokeStyle;
+screenContext.fillStyle = DEBUG ? 'cyan' : context.fillStyle;
 screenContext.lineCap = 'round';
 screenContext.lineJoin = 'round';
 screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
+
+// const cursor = document.getElementById('cursor');
+// cursor.style.width = cursor.style.height = `${context.lineWidth * scaleRate}px`;
+
 
 let undoStack = [];
 let redoStack = [];
@@ -55,44 +79,50 @@ for (let type of ['mousemove', 'mousedown']) {
     })
 }
 
-{ // add old mouse position in mousemove event
-    let oldEvent = {};
-    document.addEventListener('mousemove', e => {
-        e.oldClientX = oldEvent.clientX;
-        e.oldClientY = oldEvent.clientY;
-        oldEvent = e;
-    }, true)
-}
-
-// cast 'newaction' event if click, scroll, press any key or resize window
+// cast 'newaction' event if click, scroll, press any key or resize 
 for (type of ['keydown', 'keyup', 'mousedown', 'mouseup', 'wheel', 'mouseleave']) {
-    document.addEventListener(type, e => document.dispatchEvent(new CustomEvent('newaction')));
+    document.addEventListener(type, e => {
+        if (e.repeat) return; // prevent long press repeated fire
+        document.dispatchEvent(new CustomEvent('newaction'));
+    });
 }
+document.addEventListener('keyup', e => {
+});
 window.addEventListener('resize', e => document.dispatchEvent(new CustomEvent('newaction')));
 window.addEventListener('wheel', e => e.preventDefault(), { passive: false })
 
 
 // event handler
+document.addEventListener('mousemove', e => {
+    // setCursorPosition(e);
+});
+
 document.addEventListener('mousedown', e => {
-    switch (e.button) {
-        case 0: // left click
-            onDrawStart(e);
-            break;
-        case 1: // middle click
-            onDragStart(e);
-            break;
-    }
-})
+    if (e.button === 0 && !e.altKey) onDrawStart(e);
+    if (e.button === 1) onDragStart(e);
+    if (e.button === 0 && e.altKey) onDragStart(e);
+});
 
 document.addEventListener('wheel', e => {
     // rate ** -e.deltaY
     if (DEBUG > 1) console.log(e.deltaY);
     // f(x) = a^-bx
-    if (e.deltaY) scale(3 ** (-0.001 * e.deltaY), e.clientX, e.clientY);
-})
+    if (e.deltaY) scale(100 ** (-0.0005 * e.deltaY), e.clientX, e.clientY);
+});
 
 document.addEventListener('keydown', e => {
     if (e.ctrlKey && e.code === 'KeyZ') e.shiftKey ? redo() : undo();
+    if (e.code === 'KeyE') {
+        operationMode = ERASER;
+        context.globalCompositeOperation = 'destination-out';
+    }
+    if (e.code === 'KeyP') {
+        operationMode = PEN;
+        context.globalCompositeOperation = 'source-over';
+    }
+});
+
+document.addEventListener('keyup', e => {
 });
 
 window.addEventListener('resize', e => {
@@ -109,33 +139,47 @@ window.addEventListener('resize', e => {
     screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
     screenContext.lineWidth = context.lineWidth;
     screenContext.strokeStyle = DEBUG ? 'cyan' : context.strokeStyle;
+    screenContext.fillStyle = DEBUG ? 'cyan' : context.fillStyle;
     screenContext.lineCap = 'round';
     screenContext.lineJoin = 'round';
-})
+});
 
 
+// function setCursorPosition(e) {
+//     cursor.style.left = `${e.clientX}px`;
+//     cursor.style.top = `${e.clientY}px`;
+// }
 
 function onDrawStart(e) {
     const bound = {
-        left: Math.floor(e.originX), right: Math.ceil(e.originX), 
+        left: Math.floor(e.originX), right: Math.ceil(e.originX),
         top: Math.floor(e.originY), bottom: Math.ceil(e.originY)
     };
     
     const path = [{x: e.originX, y: e.originY}];
     
-    function onDraw(e) {
+    function refresh() {
         screenContext.clearRect(
             screenCanvasBound.left, screenCanvasBound.top,
             screenCanvas.width, screenCanvas.height
         );
+        
         screenContext.beginPath();
         screenContext.moveTo(path[0].x, path[0].y);
-        for (point of path) {
+        for (const point of path) {
             screenContext.lineTo(point.x, point.y);
         }
-        // screenContext.moveTo(e.originX, e.originY);
-        // screenContext.lineTo(e.clientX / scaleRate, e.clientY / scaleRate);
         screenContext.stroke();
+    }
+    
+    refresh();
+    
+    function onDraw(e) {
+        const dx = e.originX - path.at(-1).x;
+        const dy = e.originY - path.at(-1).y;
+        if (dx * dx + dy * dy < 3) return;
+        
+        refresh();
         
         if (e.originX < bound.left) bound.left = Math.floor(e.originX);
         else if (e.originX > bound.right) bound.right = Math.ceil(e.originX);
@@ -150,8 +194,11 @@ function onDrawStart(e) {
     document.addEventListener('newaction', e => {
         document.removeEventListener('mousemove', onDraw);
         
-        draw(path, bound);
+        // bound: bound of path
+        // undoStack[n].bound: bound of canvas
+        boundUnion(bound);
         undoStack.push({path: path, bound: canvasBound});
+        doUndoStack();
         redoStack = [];
         
         screenContext.clearRect(
@@ -161,8 +208,14 @@ function onDrawStart(e) {
     }, { once: true });
 }
 
+function onEraseStart(e) {
+    const path = [{x: e.originX, y: e.originY}];
+    
+    screenContext.globalCompositeOperation = 'destination-out';
+}
+
 function onDragStart(e) {
-    const onDrag = e => translate(e.clientX - e.oldClientX, e.clientY - e.oldClientY);
+    const onDrag = e => translate(e.movementX, e.movementY);
     document.addEventListener('mousemove', onDrag);
     document.addEventListener('newaction', e => document.removeEventListener('mousemove', onDrag), { once: true });
 }
@@ -175,6 +228,7 @@ function resize(width, height) {
     let lineCap     = context.lineCap    ;
     let lineJoin    = context.lineJoin   ;
     let strokeStyle = context.strokeStyle;
+    let fillStyle   = context.fillStyle  ;
     
     canvas.width = width;
     canvas.height = height;
@@ -185,6 +239,7 @@ function resize(width, height) {
     context.lineCap     = lineCap    ;
     context.lineJoin    = lineJoin   ;
     context.strokeStyle = strokeStyle;
+    context.fillStyle   = fillStyle  ;
     
     if (canvasBound === undefined) return;
     
@@ -194,22 +249,28 @@ function resize(width, height) {
     context.translate(-canvasBound.left, -canvasBound.top);
 }
 
+// do all commands in undo stack
+function doUndoStack() {
+    context.beginPath();
+    for (let step of undoStack) {
+        context.moveTo(step.path[0].x, step.path[0].y);
+        for (let point of step.path) context.lineTo(point.x, point.y);
+    }
+    context.stroke();
+}
+
 // screen coordinte => origin coordinate
 function toOrigin(x, y) {
     return {x: (x - origin.x) / scaleRate, y: (y - origin.y) / scaleRate};
 }
 
-// origin coordinate
-function draw(path, bound) {
-    bound.left -= 10;
-    bound.right += 10;
-    bound.top -= 10;
-    bound.bottom += 10;
-    
+// canvasBound = union of canvasBound and bound
+// will clear canvas
+function boundUnion(bound) {
     // first draw
     if (canvasBound === undefined) {
         canvasBound = bound;
-        resize(bound.right - bound.left, bound.bottom - bound.top);
+        resize(canvasBound.right - canvasBound.left, canvasBound.bottom - canvasBound.top);
     }
     // out of bounds
     else if (bound.left < canvasBound.left || bound.right  > canvasBound.right ||
@@ -220,23 +281,45 @@ function draw(path, bound) {
             top   : Math.min(bound.top   , canvasBound.top   ),
             bottom: Math.max(bound.bottom, canvasBound.bottom)
         };
-        
-        // canvasBound = bound;
         resize(canvasBound.right - canvasBound.left, canvasBound.bottom - canvasBound.top);
-        
-        context.beginPath();
-        for (let step of undoStack) {
-            context.moveTo(step.path[0].x, step.path[0].y);
-            for (let point of step.path) context.lineTo(point.x, point.y);
-        }
-        context.stroke();
-        
+    } else {
+        context.clearRect(canvasBound.left, canvasBound.top, canvas.width, canvas.height);
     }
+}
+
+// origin coordinate
+function draw(path, bound) {
     
-    context.beginPath();
-    context.moveTo(path[0].x, path[0].y);
-    for (let point of path) context.lineTo(point.x, point.y);
-    context.stroke();
+    // // first draw
+    // if (canvasBound === undefined) {
+    //     canvasBound = bound;
+    //     resize(bound.right - bound.left, bound.bottom - bound.top);
+    // }
+    // // out of bounds
+    // else if (bound.left < canvasBound.left || bound.right  > canvasBound.right ||
+    //          bound.top  < canvasBound.top  || bound.bottom > canvasBound.bottom) {
+    //     canvasBound = { // keep old canvasBound reference
+    //         left  : Math.min(bound.left  , canvasBound.left  ),
+    //         right : Math.max(bound.right , canvasBound.right ),
+    //         top   : Math.min(bound.top   , canvasBound.top   ),
+    //         bottom: Math.max(bound.bottom, canvasBound.bottom)
+    //     };
+        
+    //     // canvasBound = bound;
+    //     resize(canvasBound.right - canvasBound.left, canvasBound.bottom - canvasBound.top);
+        
+    //     context.beginPath();
+    //     for (let step of undoStack) {
+    //         context.moveTo(step.path[0].x, step.path[0].y);
+    //         for (let point of step.path) context.lineTo(point.x, point.y);
+    //     }
+    //     context.stroke();
+    // }
+    
+    // context.beginPath();
+    // context.moveTo(path[0].x, path[0].y);
+    // for (let point of path) context.lineTo(point.x, point.y);
+    // context.stroke();
 }
 
 // screen coordinate
@@ -259,7 +342,9 @@ function translate(dx, dy) {
 
 // screen coordinate
 function scale(rate, x, y) {
-    scaleRate *= rate;
+    const newScaleRate = scaleRate * rate;
+    if (newScaleRate < 0.2 || newScaleRate > 500) return;
+    scaleRate = newScaleRate;
     origin.x = x + rate * (origin.x - x);
     origin.y = y + rate * (origin.y - y);
     if (canvasBound !== undefined) {
@@ -282,8 +367,11 @@ function scale(rate, x, y) {
     screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
     screenContext.lineWidth = context.lineWidth;
     screenContext.strokeStyle = DEBUG ? 'cyan' : context.strokeStyle;
+    screenContext.fillStyle = DEBUG ? 'cyan' : context.fillStyle;
     screenContext.lineCap = 'round';
     screenContext.lineJoin = 'round';
+    
+    // cursor.style.width = cursor.style.height = `${context.lineWidth * scaleRate}px`;
 }
 
 function undo() {
@@ -306,22 +394,17 @@ function undo() {
         context.clearRect(bound.left, bound.top, canvas.width, canvas.height);
     }
     
-    context.beginPath();
-    for (let step of undoStack) {
-        context.moveTo(step.path[0].x, step.path[0].y);
-        for (let point of step.path) context.lineTo(point.x, point.y);
-    }
-    context.stroke();
+    doUndoStack();
 }
 
 function redo() {
     if (redoStack.length === 0) return;
     
     const command = redoStack.pop();
-    
-    draw(command.path, command.bound);
-    
+    canvasBound = command.bound;
+    resize(canvasBound.right - canvasBound.left, canvasBound.bottom - canvasBound.top);
     undoStack.push(command);
+    doUndoStack();
 }
 
 if (DEBUG) { // debug
@@ -353,6 +436,10 @@ if (DEBUG) { // debug
             canvas.offsetHeight: ${canvas.offsetHeight}<br>
             canvas.offsetLeft: ${canvas.offsetLeft}<br>
             canvas.offsetTop: ${canvas.offsetTop}<br>
+            canvasBound.left: ${canvasBound?.left}<br>
+            canvasBound.right: ${canvasBound?.right}<br>
+            canvasBound.top: ${canvasBound?.top}<br>
+            canvasBound.bottom: ${canvasBound?.bottom}<br>
             screenCanvas.width: ${screenCanvas.width}<br>
             screenCanvas.height: ${screenCanvas.height}<br>
             screenCanvas.offsetWidth: ${screenCanvas.offsetWidth}<br>
@@ -364,6 +451,7 @@ if (DEBUG) { // debug
             window.innerWidth: ${window.innerWidth}<br>
             window.innerHeight: ${window.innerHeight}<br>
             undoStack.length: ${undoStack.length}<br>
+            undoStack.at(-1).path.length: ${undoStack.at(-1)?.path.length}<br>
             redoStack.length: ${redoStack.length}<br>
         `;
     }
@@ -371,4 +459,8 @@ if (DEBUG) { // debug
     for (let type of ['mousemove', 'mousedown', 'mouseup', 'wheel', 'keydown', 'keyup']) {
         document.addEventListener(type, updateDebugInfo);
     }
+    
+    document.addEventListener('newaction', e => {
+        console.log('new action');
+    });
 }
