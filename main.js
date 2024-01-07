@@ -1,40 +1,69 @@
-/*
-reason for using screen canvas:
-    Without screen canvas, in order to achieve infinity bound canvas, the size of main canvas has
-    to be change frequently when user draws out of the bound, and it's impossible that user
-    draws out of the screen, so a screen canvas is the best solution.
-    
-pen =e=> eraser =p=> pen
-*/
+'use strict'
 
 const DEBUG = 1;
 
+/*
+mode:
+    Space: select
+    Z: pen
+    X: eraser
+    C: shape(rectangle/ellipse/triangle)
+    V: flood fill
+
+action:
+    wheel: zoom
+    ctrl + Z: undo
+    ctrl + shift + Z: redo
+    
+setting:
+    A + wheel: width
+    S + ?: color
+*/
+
+/**
+ * @typedef {{x: number, y: number}} Point
+ * @typedef {{left: number, right: number, top: number, bottom: number}} Bound
+ * @typedef {{path: Point[], bound: Bound}} Command
+ */
+
 // mode
-const PEN = 1;
-const ERASER = 2;
-let operationMode = PEN;
+/** @enum {number} */
+const MODE = Object.freeze({
+    PEN: 1,
+    ERASER: 2,
+    SHAPE: 3,
+    FLOOD_FILL: 4
+})
+/** @type {MODE} */
+let mode = MODE.PEN;
 const pen = {
     lineWidth: 3,
     strokeStyle: 'white',
 }
 
-// O = window top left, screen coordinate
-const origin = {
-    x: window.innerWidth / 2, 
+/** O = window top left, screen coordinate
+ * @type {Point}
+ */
+const anchor = {
+    x: window.innerWidth / 2,
     y: window.innerHeight / 2
 };
 
-// origin coordinate * scaleRate = screen cooridinate
+// anchor coordinate * scaleRate = screen cooridinate
 let scaleRate = 1;
 
+/** @type {HTMLCanvasElement} */
 let canvas = document.getElementById('main');
 canvas.width = 0;
 canvas.height = 0;
 if (DEBUG) canvas.style.backgroundColor = '#222';
 
-// O = origin, origin coordinate
-let canvasBound;
+/** anchor coordinate
+ * @type {Bound | null}
+ */
+let canvasBound = null;
 
+/** @type {CanvasRenderingContext2D} */
 let context = canvas.getContext('2d');
 context.lineWidth = 3;
 context.lineCap = 'round';
@@ -42,6 +71,7 @@ context.lineJoin = 'round';
 context.strokeStyle = 'white';
 context.fillStyle = 'white';
 
+/** @type {HTMLCanvasElement} */
 const screenCanvas = document.getElementById('screen');
 screenCanvas.width = window.innerWidth;
 screenCanvas.height = window.innerHeight;
@@ -50,9 +80,12 @@ screenCanvas.style.height = `${window.innerHeight}px`;
 screenCanvas.style.left = '0px';
 screenCanvas.style.top = '0px';
 
-// O = origin, origin coordinate
-let screenCanvasBound = {left: -Math.ceil(origin.x), top: -Math.ceil(origin.y)};
+/** anchor coordinate
+ * @type {Bound}
+ */
+let screenCanvasBound = {left: -Math.ceil(anchor.x), top: -Math.ceil(anchor.y)};
 
+/** @type {CanvasRenderingContext2D} */
 const screenContext = screenCanvas.getContext('2d');
 screenContext.lineWidth = context.lineWidth;
 screenContext.strokeStyle = DEBUG ? 'cyan' : context.strokeStyle;
@@ -61,26 +94,24 @@ screenContext.lineCap = 'round';
 screenContext.lineJoin = 'round';
 screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
 
-// const cursor = document.getElementById('cursor');
-// cursor.style.width = cursor.style.height = `${context.lineWidth * scaleRate}px`;
+/** @type {Command[]} */
+const undoStack = [];
+
+/** @type {Command[]} */
+const redoStack = [];
 
 
-let undoStack = [];
-let redoStack = [];
-
-
-
-// add e.clientX/Y relative to origin
-for (let type of ['mousemove', 'mousedown']) {
+// add e.clientX/Y relative to anchor
+for (const type of ['mousemove', 'mousedown']) {
     document.addEventListener(type, e => {
-        // screen coordinte => origin coordinate
-        e.originX = (e.clientX - origin.x) / scaleRate;
-        e.originY = (e.clientY - origin.y) / scaleRate;
+        // screen coordinte => anchor coordinate
+        e.anchorX = (e.clientX - anchor.x) / scaleRate;
+        e.anchorY = (e.clientY - anchor.y) / scaleRate;
     })
 }
 
 // cast 'newaction' event if click, scroll, press any key or resize 
-for (type of ['keydown', 'keyup', 'mousedown', 'mouseup', 'wheel', 'mouseleave']) {
+for (const type of ['keydown', 'keyup', 'mousedown', 'mouseup', 'wheel', 'mouseleave']) {
     document.addEventListener(type, e => {
         if (e.repeat) return; // prevent long press repeated fire
         document.dispatchEvent(new CustomEvent('newaction'));
@@ -92,7 +123,7 @@ window.addEventListener('resize', e => document.dispatchEvent(new CustomEvent('n
 window.addEventListener('wheel', e => e.preventDefault(), { passive: false })
 
 
-// event handler
+////////// action recognition //////////
 document.addEventListener('mousemove', e => {
     // setCursorPosition(e);
 });
@@ -113,11 +144,11 @@ document.addEventListener('wheel', e => {
 document.addEventListener('keydown', e => {
     if (e.ctrlKey && e.code === 'KeyZ') e.shiftKey ? redo() : undo();
     if (e.code === 'KeyE') {
-        operationMode = ERASER;
+        mode = MODE.ERASER;
         context.globalCompositeOperation = 'destination-out';
     }
     if (e.code === 'KeyP') {
-        operationMode = PEN;
+        mode = MODE.PEN;
         context.globalCompositeOperation = 'source-over';
     }
 });
@@ -130,8 +161,8 @@ window.addEventListener('resize', e => {
     screenCanvas.height = Math.ceil(window.innerHeight / scaleRate) + 1;
     screenCanvas.style.width = `${screenCanvas.width * scaleRate}px`;
     screenCanvas.style.height = `${screenCanvas.height * scaleRate}px`;
-    let blockCountX = origin.x / scaleRate;
-    let blockCountY = origin.y / scaleRate;
+    let blockCountX = anchor.x / scaleRate;
+    let blockCountY = anchor.y / scaleRate;
     screenCanvasBound.left = -Math.ceil(blockCountX);
     screenCanvasBound.top = -Math.ceil(blockCountY);
     screenCanvas.style.left = `${(blockCountX + screenCanvasBound.left) * scaleRate}px`;
@@ -144,19 +175,15 @@ window.addEventListener('resize', e => {
     screenContext.lineJoin = 'round';
 });
 
-
-// function setCursorPosition(e) {
-//     cursor.style.left = `${e.clientX}px`;
-//     cursor.style.top = `${e.clientY}px`;
-// }
-
+////////// action handler //////////
+/** @type {(e: MouseEvent) => void} */
 function onDrawStart(e) {
     const bound = {
-        left: Math.floor(e.originX), right: Math.ceil(e.originX),
-        top: Math.floor(e.originY), bottom: Math.ceil(e.originY)
+        left: Math.floor(e.anchorX), right: Math.ceil(e.anchorX),
+        top: Math.floor(e.anchorY), bottom: Math.ceil(e.anchorY)
     };
     
-    const path = [{x: e.originX, y: e.originY}];
+    const path = [{x: e.anchorX, y: e.anchorY}];
     
     function refresh() {
         screenContext.clearRect(
@@ -175,18 +202,18 @@ function onDrawStart(e) {
     refresh();
     
     function onDraw(e) {
-        const dx = e.originX - path.at(-1).x;
-        const dy = e.originY - path.at(-1).y;
+        const dx = e.anchorX - path.at(-1).x;
+        const dy = e.anchorY - path.at(-1).y;
         if (dx * dx + dy * dy < 3) return;
         
         refresh();
         
-        if (e.originX < bound.left) bound.left = Math.floor(e.originX);
-        else if (e.originX > bound.right) bound.right = Math.ceil(e.originX);
-        if (e.originY < bound.top) bound.top = Math.floor(e.originY);
-        else if (e.originY > bound.bottom) bound.bottom = Math.ceil(e.originY);
+        if (e.anchorX < bound.left) bound.left = Math.floor(e.anchorX);
+        else if (e.anchorX > bound.right) bound.right = Math.ceil(e.anchorX);
+        if (e.anchorY < bound.top) bound.top = Math.floor(e.anchorY);
+        else if (e.anchorY > bound.bottom) bound.bottom = Math.ceil(e.anchorY);
         
-        path.push({x: e.originX, y: e.originY});
+        path.push({x: e.anchorX, y: e.anchorY});
     }
     
     document.addEventListener('mousemove', onDraw);
@@ -199,7 +226,7 @@ function onDrawStart(e) {
         boundUnion(bound);
         undoStack.push({path: path, bound: canvasBound});
         doUndoStack();
-        redoStack = [];
+        redoStack.length = 0;
         
         screenContext.clearRect(
             screenCanvasBound.left, screenCanvasBound.top,
@@ -208,12 +235,14 @@ function onDrawStart(e) {
     }, { once: true });
 }
 
+/** @type {(e: MouseEvent) => void} */
 function onEraseStart(e) {
-    const path = [{x: e.originX, y: e.originY}];
+    const path = [{x: e.anchorX, y: e.anchorY}];
     
     screenContext.globalCompositeOperation = 'destination-out';
 }
 
+/** @type {(e: MouseEvent) => void} */
 function onDragStart(e) {
     const onDrag = e => translate(e.movementX, e.movementY);
     document.addEventListener('mousemove', onDrag);
@@ -221,8 +250,9 @@ function onDragStart(e) {
 }
 
 
-
-// change canvas.width & canvas.height while keeping context
+/** change canvas.width & canvas.height while keeping context
+ * @type {(width: number, height: number) => void}
+ */
 function resize(width, height) {
     let lineWidth   = context.lineWidth  ;
     let lineCap     = context.lineCap    ;
@@ -241,10 +271,10 @@ function resize(width, height) {
     context.strokeStyle = strokeStyle;
     context.fillStyle   = fillStyle  ;
     
-    if (canvasBound === undefined) return;
+    if (canvasBound === null) return;
     
-    canvas.style.left = `${origin.x + canvasBound.left * scaleRate}px`;
-    canvas.style.top  = `${origin.y + canvasBound.top  * scaleRate}px`;
+    canvas.style.left = `${anchor.x + canvasBound.left * scaleRate}px`;
+    canvas.style.top  = `${anchor.y + canvasBound.top  * scaleRate}px`;
     
     context.translate(-canvasBound.left, -canvasBound.top);
 }
@@ -259,16 +289,18 @@ function doUndoStack() {
     context.stroke();
 }
 
-// screen coordinte => origin coordinate
-function toOrigin(x, y) {
-    return {x: (x - origin.x) / scaleRate, y: (y - origin.y) / scaleRate};
+// screen coordinte => anchor coordinate
+function toAnchor(x, y) {
+    return {x: (x - anchor.x) / scaleRate, y: (y - anchor.y) / scaleRate};
 }
 
-// canvasBound = union of canvasBound and bound
-// will clear canvas
+// 
+/** canvasBound = union of canvasBound and bound, will clear canvas
+ * @type {(bound: Bound) => void}
+ */
 function boundUnion(bound) {
     // first draw
-    if (canvasBound === undefined) {
+    if (canvasBound === null) {
         canvasBound = bound;
         resize(canvasBound.right - canvasBound.left, canvasBound.bottom - canvasBound.top);
     }
@@ -287,52 +319,24 @@ function boundUnion(bound) {
     }
 }
 
-// origin coordinate
+// anchor coordinate
 function draw(path, bound) {
     
-    // // first draw
-    // if (canvasBound === undefined) {
-    //     canvasBound = bound;
-    //     resize(bound.right - bound.left, bound.bottom - bound.top);
-    // }
-    // // out of bounds
-    // else if (bound.left < canvasBound.left || bound.right  > canvasBound.right ||
-    //          bound.top  < canvasBound.top  || bound.bottom > canvasBound.bottom) {
-    //     canvasBound = { // keep old canvasBound reference
-    //         left  : Math.min(bound.left  , canvasBound.left  ),
-    //         right : Math.max(bound.right , canvasBound.right ),
-    //         top   : Math.min(bound.top   , canvasBound.top   ),
-    //         bottom: Math.max(bound.bottom, canvasBound.bottom)
-    //     };
-        
-    //     // canvasBound = bound;
-    //     resize(canvasBound.right - canvasBound.left, canvasBound.bottom - canvasBound.top);
-        
-    //     context.beginPath();
-    //     for (let step of undoStack) {
-    //         context.moveTo(step.path[0].x, step.path[0].y);
-    //         for (let point of step.path) context.lineTo(point.x, point.y);
-    //     }
-    //     context.stroke();
-    // }
-    
-    // context.beginPath();
-    // context.moveTo(path[0].x, path[0].y);
-    // for (let point of path) context.lineTo(point.x, point.y);
-    // context.stroke();
 }
 
-// screen coordinate
+/** screen coordinate
+ * @type {(dx: number, dy: number) => void}
+ */
 function translate(dx, dy) {
-    origin.x += dx;
-    origin.y += dy;
-    if (canvasBound !== undefined) {
-        canvas.style.left = `${origin.x + canvasBound.left * scaleRate}px`;
-        canvas.style.top = `${origin.y + canvasBound.top * scaleRate}px`;
+    anchor.x += dx;
+    anchor.y += dy;
+    if (canvasBound !== null) {
+        canvas.style.left = `${anchor.x + canvasBound.left * scaleRate}px`;
+        canvas.style.top = `${anchor.y + canvasBound.top * scaleRate}px`;
     }
     
-    let blockCountX = origin.x / scaleRate;
-    let blockCountY = origin.y / scaleRate;
+    let blockCountX = anchor.x / scaleRate;
+    let blockCountY = anchor.y / scaleRate;
     screenCanvasBound.left = -Math.ceil(blockCountX);
     screenCanvasBound.top = -Math.ceil(blockCountY);
     screenCanvas.style.left = `${(blockCountX + screenCanvasBound.left) * scaleRate}px`;
@@ -340,16 +344,18 @@ function translate(dx, dy) {
     screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
 }
 
-// screen coordinate
+/** screen coordinate
+ * @type {(rate: number, x: number, y: number) => void}
+ */
 function scale(rate, x, y) {
     const newScaleRate = scaleRate * rate;
     if (newScaleRate < 0.2 || newScaleRate > 500) return;
     scaleRate = newScaleRate;
-    origin.x = x + rate * (origin.x - x);
-    origin.y = y + rate * (origin.y - y);
-    if (canvasBound !== undefined) {
-        canvas.style.left = `${origin.x + canvasBound.left * scaleRate}px`;
-        canvas.style.top  = `${origin.y + canvasBound.top  * scaleRate}px`;
+    anchor.x = x + rate * (anchor.x - x);
+    anchor.y = y + rate * (anchor.y - y);
+    if (canvasBound !== null) {
+        canvas.style.left = `${anchor.x + canvasBound.left * scaleRate}px`;
+        canvas.style.top  = `${anchor.y + canvasBound.top  * scaleRate}px`;
         canvas.style.width = `${canvas.width * scaleRate}px`;
         canvas.style.height = `${canvas.height * scaleRate}px`;
     }
@@ -358,8 +364,8 @@ function scale(rate, x, y) {
     screenCanvas.height = Math.ceil(window.innerHeight / scaleRate) + 1;
     screenCanvas.style.width = `${screenCanvas.width * scaleRate}px`;
     screenCanvas.style.height = `${screenCanvas.height * scaleRate}px`;
-    let blockCountX = origin.x / scaleRate;
-    let blockCountY = origin.y / scaleRate;
+    let blockCountX = anchor.x / scaleRate;
+    let blockCountY = anchor.y / scaleRate;
     screenCanvasBound.left = -Math.ceil(blockCountX);
     screenCanvasBound.top = -Math.ceil(blockCountY);
     screenCanvas.style.left = `${(blockCountX + screenCanvasBound.left) * scaleRate}px`;
@@ -370,8 +376,6 @@ function scale(rate, x, y) {
     screenContext.fillStyle = DEBUG ? 'cyan' : context.fillStyle;
     screenContext.lineCap = 'round';
     screenContext.lineJoin = 'round';
-    
-    // cursor.style.width = cursor.style.height = `${context.lineWidth * scaleRate}px`;
 }
 
 function undo() {
@@ -381,7 +385,7 @@ function undo() {
     
     if (undoStack.length === 0) {
         // reset canvas
-        canvasBound = undefined;
+        canvasBound = null;
         resize(0, 0);
         return;
     }
@@ -410,25 +414,25 @@ function redo() {
 if (DEBUG) { // debug
     const debugInfo = document.getElementById('debug');
     
-    const originPoint = document.createElement('div');
-    originPoint.style.backgroundColor = 'red';
-    originPoint.style.position = 'fixed';
-    originPoint.style.width = '10px';
-    originPoint.style.height = '10px';
-    originPoint.style.borderRadius = '50%';
-    originPoint.style.translate = '-50% -50%';
-    document.body.appendChild(originPoint);
+    const anchorPoint = document.createElement('div');
+    anchorPoint.style.backgroundColor = 'red';
+    anchorPoint.style.position = 'fixed';
+    anchorPoint.style.width = '10px';
+    anchorPoint.style.height = '10px';
+    anchorPoint.style.borderRadius = '50%';
+    anchorPoint.style.translate = '-50% -50%';
+    document.body.appendChild(anchorPoint);
     
     function updateDebugInfo(e) {
-        originPoint.style.left = `${origin.x}px`;
-        originPoint.style.top = `${origin.y}px`;
+        anchorPoint.style.left = `${anchor.x}px`;
+        anchorPoint.style.top = `${anchor.y}px`;
         debugInfo.innerHTML = `
             e.clientX: ${e.clientX}<br>
             e.clientY: ${e.clientY}<br>
-            e.originX: ${e.originX}<br>
-            e.originY: ${e.originY}<br>
-            origin.x: ${origin.x}<br>
-            origin.y: ${origin.y}<br>
+            e.anchorX: ${e.anchorX}<br>
+            e.anchorY: ${e.anchorY}<br>
+            anchor.x: ${anchor.x}<br>
+            anchor.y: ${anchor.y}<br>
             scaleRate: ${scaleRate}<br>
             canvas.width: ${canvas.width}<br>
             canvas.height: ${canvas.height}<br>
@@ -459,8 +463,4 @@ if (DEBUG) { // debug
     for (let type of ['mousemove', 'mousedown', 'mouseup', 'wheel', 'keydown', 'keyup']) {
         document.addEventListener(type, updateDebugInfo);
     }
-    
-    document.addEventListener('newaction', e => {
-        console.log('new action');
-    });
 }
