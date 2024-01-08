@@ -10,15 +10,68 @@ mode:
     C: shape(rectangle/ellipse/triangle)
     V: flood fill
 
-action:
+action (instant):
     wheel: zoom
     ctrl + Z: undo
     ctrl + shift + Z: redo
+
+action (pressed):
+    left button: main function
+    wheel button: drag
+    W/A/S/D: move canvas up/right/down/left
+    Q/E: zoom in/out at mouse position
     
 setting:
-    A + wheel: width
-    S + ?: color
+    F + wheel: width
+    G + ?: color
 */
+
+////////// mode //////////
+/** @enum {number} */
+const MODE = Object.freeze({
+    PEN: 10,
+    ERASER: 20,
+    SHAPE_RECTANGLE: 30,
+    SHAPE_ELLIPSE: 31,
+    SHAPE_TRIANGLE: 32,
+    FLOOD_FILL: 40
+})
+
+
+////////// action //////////
+/** @enum {number} */
+const ACTION = Object.freeze({
+    NOTHING: 0,
+    DRAGING: 1,
+    TRANSLATING: 2,
+    ZOOMING: 3,
+    DRAWING: 10,
+    ERASING: 20,
+    SELECTING_SHAPE: 30,
+    HELP_PAGE: 100,
+    PALETTE: 101,
+    LINE_WIDTH: 102,
+})
+
+////////// status //////////
+const state = {
+    /** @type {MODE} */
+    mode: MODE.PEN,
+    /** @type {ACTION} */
+    action: ACTION.NOTHING,
+    lineWidth: 3,
+    color: 'white',
+    
+    /** @type {MODE} */
+    shape: MODE.SHAPE_RECTANGLE,
+    
+    // anchor coordinate * zoom = screen cooridinate
+    zoom: 1,
+    
+    // screen coordinate
+    anchorX: window.innerWidth / 2,
+    anchorY: window.innerHeight / 2,
+}
 
 /**
  * @typedef {{x: number, y: number}} Point
@@ -26,50 +79,22 @@ setting:
  * @typedef {{path: Point[], bound: Bound}} Command
  */
 
-// mode
-/** @enum {number} */
-const MODE = Object.freeze({
-    PEN: 1,
-    ERASER: 2,
-    SHAPE: 3,
-    FLOOD_FILL: 4
-})
-/** @type {MODE} */
-let mode = MODE.PEN;
-const pen = {
-    lineWidth: 3,
-    strokeStyle: 'white',
-}
-
-/** O = window top left, screen coordinate
- * @type {Point}
- */
-const anchor = {
-    x: window.innerWidth / 2,
-    y: window.innerHeight / 2
-};
-
-// anchor coordinate * scaleRate = screen cooridinate
-let scaleRate = 1;
-
 /** @type {HTMLCanvasElement} */
-let canvas = document.getElementById('main');
+const canvas = document.getElementById('main');
 canvas.width = 0;
 canvas.height = 0;
 if (DEBUG) canvas.style.backgroundColor = '#222';
 
-/** anchor coordinate
- * @type {Bound | null}
- */
+/** @type {Bound | null} anchor coordinate */
 let canvasBound = null;
 
 /** @type {CanvasRenderingContext2D} */
-let context = canvas.getContext('2d');
+const context = canvas.getContext('2d');
 context.lineWidth = 3;
 context.lineCap = 'round';
 context.lineJoin = 'round';
-context.strokeStyle = 'white';
-context.fillStyle = 'white';
+context.strokeStyle = state.color;
+context.fillStyle = state.color;
 
 /** @type {HTMLCanvasElement} */
 const screenCanvas = document.getElementById('screen');
@@ -80,16 +105,14 @@ screenCanvas.style.height = `${window.innerHeight}px`;
 screenCanvas.style.left = '0px';
 screenCanvas.style.top = '0px';
 
-/** anchor coordinate
- * @type {Bound}
- */
-let screenCanvasBound = {left: -Math.ceil(anchor.x), top: -Math.ceil(anchor.y)};
+/** @type {Bound} anchor coordinate */
+let screenCanvasBound = {left: -Math.ceil(state.anchorX), top: -Math.ceil(state.anchorY)};
 
 /** @type {CanvasRenderingContext2D} */
 const screenContext = screenCanvas.getContext('2d');
 screenContext.lineWidth = context.lineWidth;
-screenContext.strokeStyle = DEBUG ? 'cyan' : context.strokeStyle;
-screenContext.fillStyle = DEBUG ? 'cyan' : context.fillStyle;
+screenContext.strokeStyle = DEBUG ? 'cyan' : state.color;
+screenContext.fillStyle = DEBUG ? 'cyan' : state.color;
 screenContext.lineCap = 'round';
 screenContext.lineJoin = 'round';
 screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
@@ -101,31 +124,33 @@ const undoStack = [];
 const redoStack = [];
 
 
-// add e.clientX/Y relative to anchor
+// calculate e.clientX/Y in anchor coordinate
+let mouseAnchorX, mouseAnchorY;
 for (const type of ['mousemove', 'mousedown']) {
     document.addEventListener(type, e => {
         // screen coordinte => anchor coordinate
-        e.anchorX = (e.clientX - anchor.x) / scaleRate;
-        e.anchorY = (e.clientY - anchor.y) / scaleRate;
+        mouseAnchorX = (e.clientX - state.anchorX) / state.zoom;
+        mouseAnchorY = (e.clientY - state.anchorY) / state.zoom;
     })
 }
 
-// cast 'newaction' event if click, scroll, press any key or resize 
+// cast 'newaction' event if click, scroll, press any key or resize
+/** @typedef {{detail: KeyboardEvent | MouseEvent | WheelEvent | UIEvent}} NewActionEvent */
 for (const type of ['keydown', 'keyup', 'mousedown', 'mouseup', 'wheel', 'mouseleave']) {
     document.addEventListener(type, e => {
         if (e.repeat) return; // prevent long press repeated fire
-        document.dispatchEvent(new CustomEvent('newaction'));
+        document.dispatchEvent(new CustomEvent('newaction', { detail: e }));
     });
 }
 document.addEventListener('keyup', e => {
 });
-window.addEventListener('resize', e => document.dispatchEvent(new CustomEvent('newaction')));
+window.addEventListener('resize', e => document.dispatchEvent(new CustomEvent('newaction', { detail: e })));
 window.addEventListener('wheel', e => e.preventDefault(), { passive: false })
 
 
 ////////// action recognition //////////
 document.addEventListener('mousemove', e => {
-    // setCursorPosition(e);
+    
 });
 
 document.addEventListener('mousedown', e => {
@@ -144,11 +169,11 @@ document.addEventListener('wheel', e => {
 document.addEventListener('keydown', e => {
     if (e.ctrlKey && e.code === 'KeyZ') e.shiftKey ? redo() : undo();
     if (e.code === 'KeyE') {
-        mode = MODE.ERASER;
+        state.mode = MODE.ERASER;
         context.globalCompositeOperation = 'destination-out';
     }
     if (e.code === 'KeyP') {
-        mode = MODE.PEN;
+        state.mode = MODE.PEN;
         context.globalCompositeOperation = 'source-over';
     }
 });
@@ -157,20 +182,20 @@ document.addEventListener('keyup', e => {
 });
 
 window.addEventListener('resize', e => {
-    screenCanvas.width = Math.ceil(window.innerWidth / scaleRate) + 1;
-    screenCanvas.height = Math.ceil(window.innerHeight / scaleRate) + 1;
-    screenCanvas.style.width = `${screenCanvas.width * scaleRate}px`;
-    screenCanvas.style.height = `${screenCanvas.height * scaleRate}px`;
-    let blockCountX = anchor.x / scaleRate;
-    let blockCountY = anchor.y / scaleRate;
+    screenCanvas.width = Math.ceil(window.innerWidth / state.zoom) + 1;
+    screenCanvas.height = Math.ceil(window.innerHeight / state.zoom) + 1;
+    screenCanvas.style.width = `${screenCanvas.width * state.zoom}px`;
+    screenCanvas.style.height = `${screenCanvas.height * state.zoom}px`;
+    let blockCountX = state.anchorX / state.zoom;
+    let blockCountY = state.anchorY / state.zoom;
     screenCanvasBound.left = -Math.ceil(blockCountX);
     screenCanvasBound.top = -Math.ceil(blockCountY);
-    screenCanvas.style.left = `${(blockCountX + screenCanvasBound.left) * scaleRate}px`;
-    screenCanvas.style.top = `${(blockCountY + screenCanvasBound.top) * scaleRate}px`;
+    screenCanvas.style.left = `${(blockCountX + screenCanvasBound.left) * state.zoom}px`;
+    screenCanvas.style.top = `${(blockCountY + screenCanvasBound.top) * state.zoom}px`;
     screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
-    screenContext.lineWidth = context.lineWidth;
-    screenContext.strokeStyle = DEBUG ? 'cyan' : context.strokeStyle;
-    screenContext.fillStyle = DEBUG ? 'cyan' : context.fillStyle;
+    screenContext.lineWidth = state.lineWidth;
+    screenContext.strokeStyle = DEBUG ? 'cyan' : state.color;
+    screenContext.fillStyle = DEBUG ? 'cyan' : state.color;
     screenContext.lineCap = 'round';
     screenContext.lineJoin = 'round';
 });
@@ -179,11 +204,11 @@ window.addEventListener('resize', e => {
 /** @type {(e: MouseEvent) => void} */
 function onDrawStart(e) {
     const bound = {
-        left: Math.floor(e.anchorX), right: Math.ceil(e.anchorX),
-        top: Math.floor(e.anchorY), bottom: Math.ceil(e.anchorY)
+        left: Math.floor(mouseAnchorX), right: Math.ceil(mouseAnchorX),
+        top: Math.floor(mouseAnchorY), bottom: Math.ceil(mouseAnchorY)
     };
     
-    const path = [{x: e.anchorX, y: e.anchorY}];
+    const path = [{x: mouseAnchorX, y: mouseAnchorY}];
     
     function refresh() {
         screenContext.clearRect(
@@ -202,18 +227,18 @@ function onDrawStart(e) {
     refresh();
     
     function onDraw(e) {
-        const dx = e.anchorX - path.at(-1).x;
-        const dy = e.anchorY - path.at(-1).y;
+        const dx = mouseAnchorX - path.at(-1).x;
+        const dy = mouseAnchorY - path.at(-1).y;
         if (dx * dx + dy * dy < 3) return;
         
         refresh();
         
-        if (e.anchorX < bound.left) bound.left = Math.floor(e.anchorX);
-        else if (e.anchorX > bound.right) bound.right = Math.ceil(e.anchorX);
-        if (e.anchorY < bound.top) bound.top = Math.floor(e.anchorY);
-        else if (e.anchorY > bound.bottom) bound.bottom = Math.ceil(e.anchorY);
+        if (mouseAnchorX < bound.left) bound.left = Math.floor(mouseAnchorX);
+        else if (mouseAnchorX > bound.right) bound.right = Math.ceil(mouseAnchorX);
+        if (mouseAnchorY < bound.top) bound.top = Math.floor(mouseAnchorY);
+        else if (mouseAnchorY > bound.bottom) bound.bottom = Math.ceil(mouseAnchorY);
         
-        path.push({x: e.anchorX, y: e.anchorY});
+        path.push({x: mouseAnchorX, y: mouseAnchorY});
     }
     
     document.addEventListener('mousemove', onDraw);
@@ -237,7 +262,7 @@ function onDrawStart(e) {
 
 /** @type {(e: MouseEvent) => void} */
 function onEraseStart(e) {
-    const path = [{x: e.anchorX, y: e.anchorY}];
+    const path = [{x: mouseAnchorX, y: mouseAnchorY}];
     
     screenContext.globalCompositeOperation = 'destination-out';
 }
@@ -250,31 +275,24 @@ function onDragStart(e) {
 }
 
 
-/** change canvas.width & canvas.height while keeping context
- * @type {(width: number, height: number) => void}
- */
+//change canvas.width & canvas.height while keeping context
+/** @type {(width: number, height: number) => void} */
 function resize(width, height) {
-    let lineWidth   = context.lineWidth  ;
-    let lineCap     = context.lineCap    ;
-    let lineJoin    = context.lineJoin   ;
-    let strokeStyle = context.strokeStyle;
-    let fillStyle   = context.fillStyle  ;
-    
     canvas.width = width;
     canvas.height = height;
-    canvas.style.width  = `${canvas.width  * scaleRate}px`;
-    canvas.style.height = `${canvas.height * scaleRate}px`;
+    canvas.style.width  = `${canvas.width  * state.zoom}px`;
+    canvas.style.height = `${canvas.height * state.zoom}px`;
     
-    context.lineWidth   = lineWidth  ;
-    context.lineCap     = lineCap    ;
-    context.lineJoin    = lineJoin   ;
-    context.strokeStyle = strokeStyle;
-    context.fillStyle   = fillStyle  ;
+    context.lineWidth   = state.lineWidth;
+    context.lineCap     =         'round';
+    context.lineJoin    =         'round';
+    context.strokeStyle =     state.color;
+    context.fillStyle   =     state.color;
     
     if (canvasBound === null) return;
     
-    canvas.style.left = `${anchor.x + canvasBound.left * scaleRate}px`;
-    canvas.style.top  = `${anchor.y + canvasBound.top  * scaleRate}px`;
+    canvas.style.left = `${state.anchorX + canvasBound.left * state.zoom}px`;
+    canvas.style.top  = `${state.anchorY + canvasBound.top  * state.zoom}px`;
     
     context.translate(-canvasBound.left, -canvasBound.top);
 }
@@ -291,7 +309,7 @@ function doUndoStack() {
 
 // screen coordinte => anchor coordinate
 function toAnchor(x, y) {
-    return {x: (x - anchor.x) / scaleRate, y: (y - anchor.y) / scaleRate};
+    return {x: (x - state.anchorX) / state.zoom, y: (y - state.anchorY) / state.zoom};
 }
 
 // 
@@ -328,19 +346,19 @@ function draw(path, bound) {
  * @type {(dx: number, dy: number) => void}
  */
 function translate(dx, dy) {
-    anchor.x += dx;
-    anchor.y += dy;
+    state.anchorX += dx;
+    state.anchorY += dy;
     if (canvasBound !== null) {
-        canvas.style.left = `${anchor.x + canvasBound.left * scaleRate}px`;
-        canvas.style.top = `${anchor.y + canvasBound.top * scaleRate}px`;
+        canvas.style.left = `${state.anchorX + canvasBound.left * state.zoom}px`;
+        canvas.style.top = `${state.anchorY + canvasBound.top * state.zoom}px`;
     }
     
-    let blockCountX = anchor.x / scaleRate;
-    let blockCountY = anchor.y / scaleRate;
+    let blockCountX = state.anchorX / state.zoom;
+    let blockCountY = state.anchorY / state.zoom;
     screenCanvasBound.left = -Math.ceil(blockCountX);
     screenCanvasBound.top = -Math.ceil(blockCountY);
-    screenCanvas.style.left = `${(blockCountX + screenCanvasBound.left) * scaleRate}px`;
-    screenCanvas.style.top = `${(blockCountY + screenCanvasBound.top) * scaleRate}px`;
+    screenCanvas.style.left = `${(blockCountX + screenCanvasBound.left) * state.zoom}px`;
+    screenCanvas.style.top = `${(blockCountY + screenCanvasBound.top) * state.zoom}px`;
     screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
 }
 
@@ -348,32 +366,32 @@ function translate(dx, dy) {
  * @type {(rate: number, x: number, y: number) => void}
  */
 function scale(rate, x, y) {
-    const newScaleRate = scaleRate * rate;
-    if (newScaleRate < 0.2 || newScaleRate > 500) return;
-    scaleRate = newScaleRate;
-    anchor.x = x + rate * (anchor.x - x);
-    anchor.y = y + rate * (anchor.y - y);
+    const newScaleRate = state.zoom * rate;
+    if (newScaleRate < 0.2 || newScaleRate > 100) return;
+    state.zoom = newScaleRate;
+    state.anchorX = x + rate * (state.anchorX - x);
+    state.anchorY = y + rate * (state.anchorY - y);
     if (canvasBound !== null) {
-        canvas.style.left = `${anchor.x + canvasBound.left * scaleRate}px`;
-        canvas.style.top  = `${anchor.y + canvasBound.top  * scaleRate}px`;
-        canvas.style.width = `${canvas.width * scaleRate}px`;
-        canvas.style.height = `${canvas.height * scaleRate}px`;
+        canvas.style.left = `${state.anchorX + canvasBound.left * state.zoom}px`;
+        canvas.style.top  = `${state.anchorY + canvasBound.top  * state.zoom}px`;
+        canvas.style.width = `${canvas.width * state.zoom}px`;
+        canvas.style.height = `${canvas.height * state.zoom}px`;
     }
     
-    screenCanvas.width = Math.ceil(window.innerWidth / scaleRate) + 1;
-    screenCanvas.height = Math.ceil(window.innerHeight / scaleRate) + 1;
-    screenCanvas.style.width = `${screenCanvas.width * scaleRate}px`;
-    screenCanvas.style.height = `${screenCanvas.height * scaleRate}px`;
-    let blockCountX = anchor.x / scaleRate;
-    let blockCountY = anchor.y / scaleRate;
+    screenCanvas.width = Math.ceil(window.innerWidth / state.zoom) + 1;
+    screenCanvas.height = Math.ceil(window.innerHeight / state.zoom) + 1;
+    screenCanvas.style.width = `${screenCanvas.width * state.zoom}px`;
+    screenCanvas.style.height = `${screenCanvas.height * state.zoom}px`;
+    let blockCountX = state.anchorX / state.zoom;
+    let blockCountY = state.anchorY / state.zoom;
     screenCanvasBound.left = -Math.ceil(blockCountX);
     screenCanvasBound.top = -Math.ceil(blockCountY);
-    screenCanvas.style.left = `${(blockCountX + screenCanvasBound.left) * scaleRate}px`;
-    screenCanvas.style.top = `${(blockCountY + screenCanvasBound.top) * scaleRate}px`;
+    screenCanvas.style.left = `${(blockCountX + screenCanvasBound.left) * state.zoom}px`;
+    screenCanvas.style.top = `${(blockCountY + screenCanvasBound.top) * state.zoom}px`;
     screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
-    screenContext.lineWidth = context.lineWidth;
-    screenContext.strokeStyle = DEBUG ? 'cyan' : context.strokeStyle;
-    screenContext.fillStyle = DEBUG ? 'cyan' : context.fillStyle;
+    screenContext.lineWidth = state.lineWidth;
+    screenContext.strokeStyle = DEBUG ? 'cyan' : state.color;
+    screenContext.fillStyle = DEBUG ? 'cyan' : state.color;
     screenContext.lineCap = 'round';
     screenContext.lineJoin = 'round';
 }
@@ -424,16 +442,16 @@ if (DEBUG) { // debug
     document.body.appendChild(anchorPoint);
     
     function updateDebugInfo(e) {
-        anchorPoint.style.left = `${anchor.x}px`;
-        anchorPoint.style.top = `${anchor.y}px`;
+        anchorPoint.style.left = `${state.anchorX}px`;
+        anchorPoint.style.top = `${state.anchorY}px`;
         debugInfo.innerHTML = `
             e.clientX: ${e.clientX}<br>
             e.clientY: ${e.clientY}<br>
-            e.anchorX: ${e.anchorX}<br>
-            e.anchorY: ${e.anchorY}<br>
-            anchor.x: ${anchor.x}<br>
-            anchor.y: ${anchor.y}<br>
-            scaleRate: ${scaleRate}<br>
+            mouseAnchorX: ${mouseAnchorX}<br>
+            mouseAnchorY: ${mouseAnchorY}<br>
+            state.anchorX: ${state.anchorX}<br>
+            state.anchorY: ${state.anchorY}<br>
+            state.zoom: ${state.zoom}<br>
             canvas.width: ${canvas.width}<br>
             canvas.height: ${canvas.height}<br>
             canvas.offsetWidth: ${canvas.offsetWidth}<br>
