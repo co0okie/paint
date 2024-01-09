@@ -203,11 +203,13 @@ window.addEventListener('resize', e => {
 ////////// action handler //////////
 /** @type {(e: MouseEvent) => void} */
 function onDrawStart(e) {
+    /** @type {Bound} */
     const bound = {
         left: Math.floor(mouseAnchorX), right: Math.ceil(mouseAnchorX),
         top: Math.floor(mouseAnchorY), bottom: Math.ceil(mouseAnchorY)
     };
     
+    /** @type {Point[]} */
     const path = [{x: mouseAnchorX, y: mouseAnchorY}];
     
     function refresh() {
@@ -271,7 +273,17 @@ function onEraseStart(e) {
 function onDragStart(e) {
     const onDrag = e => translate(e.movementX, e.movementY);
     document.addEventListener('mousemove', onDrag);
-    document.addEventListener('newaction', e => document.removeEventListener('mousemove', onDrag), { once: true });
+    document.addEventListener('newaction', e => {
+        document.removeEventListener('mousemove', onDrag);
+    
+        let blockCountX = state.anchorX / state.zoom;
+        let blockCountY = state.anchorY / state.zoom;
+        screenCanvasBound.left = -Math.ceil(blockCountX);
+        screenCanvasBound.top = -Math.ceil(blockCountY);
+        screenCanvas.style.left = `${(blockCountX + screenCanvasBound.left) * state.zoom}px`;
+        screenCanvas.style.top = `${(blockCountY + screenCanvasBound.top) * state.zoom}px`;
+        screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
+    }, { once: true });
 }
 
 
@@ -320,16 +332,20 @@ function boundUnion(bound) {
     // first draw
     if (canvasBound === null) {
         canvasBound = bound;
-        resize(canvasBound.right - canvasBound.left, canvasBound.bottom - canvasBound.top);
+        bound.left   -= 1000;
+        bound.right  += 1000;
+        bound.top    -= 1000;
+        bound.bottom += 1000;
+        resize(bound.right - bound.left, bound.bottom - bound.top);
     }
     // out of bounds
     else if (bound.left < canvasBound.left || bound.right  > canvasBound.right ||
              bound.top  < canvasBound.top  || bound.bottom > canvasBound.bottom) {
         canvasBound = { // keep old canvasBound reference
-            left  : Math.min(bound.left  , canvasBound.left  ),
-            right : Math.max(bound.right , canvasBound.right ),
-            top   : Math.min(bound.top   , canvasBound.top   ),
-            bottom: Math.max(bound.bottom, canvasBound.bottom)
+            left  : Math.min(bound.left   - 500, canvasBound.left  ),
+            right : Math.max(bound.right  + 500, canvasBound.right ),
+            top   : Math.min(bound.top    - 500, canvasBound.top   ),
+            bottom: Math.max(bound.bottom + 500, canvasBound.bottom)
         };
         resize(canvasBound.right - canvasBound.left, canvasBound.bottom - canvasBound.top);
     } else {
@@ -352,14 +368,6 @@ function translate(dx, dy) {
         canvas.style.left = `${state.anchorX + canvasBound.left * state.zoom}px`;
         canvas.style.top = `${state.anchorY + canvasBound.top * state.zoom}px`;
     }
-    
-    let blockCountX = state.anchorX / state.zoom;
-    let blockCountY = state.anchorY / state.zoom;
-    screenCanvasBound.left = -Math.ceil(blockCountX);
-    screenCanvasBound.top = -Math.ceil(blockCountY);
-    screenCanvas.style.left = `${(blockCountX + screenCanvasBound.left) * state.zoom}px`;
-    screenCanvas.style.top = `${(blockCountY + screenCanvasBound.top) * state.zoom}px`;
-    screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
 }
 
 /** screen coordinate
