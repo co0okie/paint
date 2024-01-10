@@ -19,16 +19,17 @@ action (pressed):
     left button: main function
     wheel button: drag
     W/A/S/D: move canvas up/right/down/left
-    Q/E: zoom in/out at mouse position
+    E/Q: zoom in/out at mouse position
     
 setting:
-    F + wheel: width
-    G + ?: color
+    F + ?: color
+    G + wheel: width
 */
 
 ////////// mode //////////
 /** @enum {number} */
 const MODE = Object.freeze({
+    SELECT: 0,
     PEN: 10,
     ERASER: 20,
     SHAPE_RECTANGLE: 30,
@@ -44,10 +45,12 @@ const ACTION = Object.freeze({
     NOTHING: 0,
     DRAGING: 1,
     TRANSLATING: 2,
-    ZOOMING: 3,
+    ZOOM_IN: 3,
+    ZOOM_OUT: 4,
     DRAWING: 10,
     ERASING: 20,
     SELECTING_SHAPE: 30,
+    DRAWING_SHAPE: 31,
     HELP_PAGE: 100,
     PALETTE: 101,
     LINE_WIDTH: 102,
@@ -72,6 +75,9 @@ const state = {
     anchorX: window.innerWidth / 2,
     anchorY: window.innerHeight / 2,
 }
+
+let translateVelocityX = 0;
+let translateVelocityY = 0;
 
 /**
  * @typedef {{x: number, y: number}} Point
@@ -125,38 +131,135 @@ const redoStack = [];
 
 
 // calculate e.clientX/Y in anchor coordinate
-let mouseAnchorX, mouseAnchorY;
+let mouseX, mouseY;
 for (const type of ['mousemove', 'mousedown']) {
     document.addEventListener(type, e => {
         // screen coordinte => anchor coordinate
-        mouseAnchorX = (e.clientX - state.anchorX) / state.zoom;
-        mouseAnchorY = (e.clientY - state.anchorY) / state.zoom;
+        mouseX = (e.clientX - state.anchorX) / state.zoom;
+        mouseY = (e.clientY - state.anchorY) / state.zoom;
     })
 }
 
 // cast 'newaction' event if click, scroll, press any key or resize
 /** @typedef {{detail: KeyboardEvent | MouseEvent | WheelEvent | UIEvent}} NewActionEvent */
-for (const type of ['keydown', 'keyup', 'mousedown', 'mouseup', 'wheel', 'mouseleave']) {
+for (const type of ['keydown', 'keyup', 'mousedown', 'mouseup', 'wheel']) {
     document.addEventListener(type, e => {
+        if (e.key === 'Alt' || e.key === 'Control' || e.key === 'Shift') return;
         if (e.repeat) return; // prevent long press repeated fire
         document.dispatchEvent(new CustomEvent('newaction', { detail: e }));
     });
 }
-document.addEventListener('keyup', e => {
-});
 window.addEventListener('resize', e => document.dispatchEvent(new CustomEvent('newaction', { detail: e })));
 window.addEventListener('wheel', e => e.preventDefault(), { passive: false })
 
-
 ////////// action recognition //////////
-document.addEventListener('mousemove', e => {
-    
+document.addEventListener('keydown', e => {
+    if (e.ctrlKey && e.code === 'KeyZ') {
+        e.shiftKey ? redo() : undo();
+        return;
+    }
+    if (e.repeat) return;
+    switch (e.code) {
+    case 'Space':
+        state.mode = MODE.SELECT;
+        break;
+    case 'KeyZ':
+        state.mode = MODE.PEN;
+        break;
+    case 'KeyX':
+        state.mode = MODE.ERASER;
+        break;
+    case 'KeyC':
+        state.action = ACTION.SELECTING_SHAPE;
+        break;
+    case 'KeyV':
+        state.mode = MODE.FLOOD_FILL;
+        break;
+    case 'KeyW':
+        translateVelocityY = -1;
+        state.action = ACTION.TRANSLATING;
+        break;
+    case 'KeyA':
+        translateVelocityX = -1;
+        state.action = ACTION.TRANSLATING;
+        break;
+    case 'KeyS':
+        translateVelocityY = 1;
+        state.action = ACTION.TRANSLATING;
+        break;
+    case 'KeyD':
+        translateVelocityX = 1;
+        state.action = ACTION.TRANSLATING;
+        break;
+    case 'KeyE':
+        state.action = ACTION.ZOOM_IN;
+        break;
+    case 'KeyQ':
+        state.action = ACTION.ZOOM_OUT;
+        break;
+    case 'KeyF':
+        state.action = ACTION.PALETTE;
+        break;
+    case 'KeyG':
+        state.action = ACTION.LINE_WIDTH;
+        break;
+    }
 });
 
 document.addEventListener('mousedown', e => {
-    if (e.button === 0 && !e.altKey) onDrawStart(e);
-    if (e.button === 1) onDragStart(e);
-    if (e.button === 0 && e.altKey) onDragStart(e);
+    if (e.button === 1) {
+        onDragStart(e)
+        state.action = ACTION.DRAGING;
+    }
+    switch (state.mode) {
+    case MODE.SELECT:
+        break;
+    case MODE.PEN:
+        if (e.button === 0) {
+            onDrawStart(e);
+            state.action = ACTION.DRAWING;
+        }
+        break;
+    case MODE.ERASER:
+        if (e.button === 0) {
+            state.action = ACTION.ERASING;
+        }
+        break;
+    case MODE.SHAPE_RECTANGLE:
+        if (e.button === 0) {
+            state.action = ACTION.DRAWING_SHAPE;
+        }
+        break;
+    case MODE.SHAPE_ELLIPSE:
+        if (e.button === 0) {
+            state.action = ACTION.DRAWING_SHAPE;
+        }
+        break;
+    case MODE.SHAPE_TRIANGLE:
+        if (e.button === 0) {
+            state.action = ACTION.DRAWING_SHAPE;
+        }
+        break;
+    case MODE.FLOOD_FILL:
+        break;
+    }
+});
+
+document.addEventListener('newaction', e => {
+    switch (state.action) {
+    case ACTION.DRAWING:
+        onDrawEnd(e);
+        break;
+    }
+    state.action = ACTION.NOTHING;
+})
+
+document.addEventListener('mousemove', e => {
+    switch (state.action) {
+    case ACTION.DRAWING:
+        onDraw(e);
+        break;
+    }
 });
 
 document.addEventListener('wheel', e => {
@@ -164,21 +267,6 @@ document.addEventListener('wheel', e => {
     if (DEBUG > 1) console.log(e.deltaY);
     // f(x) = a^-bx
     if (e.deltaY) scale(100 ** (-0.0005 * e.deltaY), e.clientX, e.clientY);
-});
-
-document.addEventListener('keydown', e => {
-    if (e.ctrlKey && e.code === 'KeyZ') e.shiftKey ? redo() : undo();
-    if (e.code === 'KeyE') {
-        state.mode = MODE.ERASER;
-        context.globalCompositeOperation = 'destination-out';
-    }
-    if (e.code === 'KeyP') {
-        state.mode = MODE.PEN;
-        context.globalCompositeOperation = 'source-over';
-    }
-});
-
-document.addEventListener('keyup', e => {
 });
 
 window.addEventListener('resize', e => {
@@ -200,17 +288,18 @@ window.addEventListener('resize', e => {
     screenContext.lineJoin = 'round';
 });
 
+window.addEventListener('beforeunload', e => {
+    if (DEBUG) return;
+    e.preventDefault()
+    return ''
+})
+
 ////////// action handler //////////
-/** @type {(e: MouseEvent) => void} */
-function onDrawStart(e) {
+const [onDrawStart, onDraw, onDrawEnd] = (() => {
     /** @type {Bound} */
-    const bound = {
-        left: Math.floor(mouseAnchorX), right: Math.ceil(mouseAnchorX),
-        top: Math.floor(mouseAnchorY), bottom: Math.ceil(mouseAnchorY)
-    };
-    
+    let bound = {};
     /** @type {Point[]} */
-    const path = [{x: mouseAnchorX, y: mouseAnchorY}];
+    let path = [];
     
     function refresh() {
         screenContext.clearRect(
@@ -226,28 +315,33 @@ function onDrawStart(e) {
         screenContext.stroke();
     }
     
-    refresh();
+    /** @type {(e: MouseEvent) => void} */
+    function onDrawStart(e) {
+        bound = {
+            left: Math.floor(mouseX), right: Math.ceil(mouseX),
+            top: Math.floor(mouseY), bottom: Math.ceil(mouseY)
+        };
+        path = [{x: mouseX, y: mouseY}];
+    }
     
+    /** @type {(e: MouseEvent) => void} */
     function onDraw(e) {
-        const dx = mouseAnchorX - path.at(-1).x;
-        const dy = mouseAnchorY - path.at(-1).y;
+        const dx = mouseX - path.at(-1).x;
+        const dy = mouseY - path.at(-1).y;
         if (dx * dx + dy * dy < 3) return;
         
         refresh();
         
-        if (mouseAnchorX < bound.left) bound.left = Math.floor(mouseAnchorX);
-        else if (mouseAnchorX > bound.right) bound.right = Math.ceil(mouseAnchorX);
-        if (mouseAnchorY < bound.top) bound.top = Math.floor(mouseAnchorY);
-        else if (mouseAnchorY > bound.bottom) bound.bottom = Math.ceil(mouseAnchorY);
+        if (mouseX < bound.left) bound.left = Math.floor(mouseX);
+        else if (mouseX > bound.right) bound.right = Math.ceil(mouseX);
+        if (mouseY < bound.top) bound.top = Math.floor(mouseY);
+        else if (mouseY > bound.bottom) bound.bottom = Math.ceil(mouseY);
         
-        path.push({x: mouseAnchorX, y: mouseAnchorY});
+        path.push({x: mouseX, y: mouseY});
     }
     
-    document.addEventListener('mousemove', onDraw);
-    
-    document.addEventListener('newaction', e => {
-        document.removeEventListener('mousemove', onDraw);
-        
+    /** @type {(e: MouseEvent) => void} */
+    function onDrawEnd(e) {
         // bound: bound of path
         // undoStack[n].bound: bound of canvas
         boundUnion(bound);
@@ -259,12 +353,14 @@ function onDrawStart(e) {
             screenCanvasBound.left, screenCanvasBound.top,
             screenCanvas.width, screenCanvas.height
         );
-    }, { once: true });
-}
+    }
+    
+    return [onDrawStart, onDraw, onDrawEnd];
+})()
 
 /** @type {(e: MouseEvent) => void} */
 function onEraseStart(e) {
-    const path = [{x: mouseAnchorX, y: mouseAnchorY}];
+    const path = [{x: mouseX, y: mouseY}];
     
     screenContext.globalCompositeOperation = 'destination-out';
 }
@@ -285,7 +381,6 @@ function onDragStart(e) {
         screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
     }, { once: true });
 }
-
 
 //change canvas.width & canvas.height while keeping context
 /** @type {(width: number, height: number) => void} */
@@ -449,14 +544,17 @@ if (DEBUG) { // debug
     anchorPoint.style.translate = '-50% -50%';
     document.body.appendChild(anchorPoint);
     
+    const reverseMODE = Object.fromEntries(Object.entries(MODE).map(([k, v]) => [v, k]))
+    const reverseACTION = Object.fromEntries(Object.entries(ACTION).map(([k, v]) => [v, k]))
+    
     function updateDebugInfo(e) {
         anchorPoint.style.left = `${state.anchorX}px`;
         anchorPoint.style.top = `${state.anchorY}px`;
         debugInfo.innerHTML = `
             e.clientX: ${e.clientX}<br>
             e.clientY: ${e.clientY}<br>
-            mouseAnchorX: ${mouseAnchorX}<br>
-            mouseAnchorY: ${mouseAnchorY}<br>
+            mouseAnchorX: ${mouseX}<br>
+            mouseAnchorY: ${mouseY}<br>
             state.anchorX: ${state.anchorX}<br>
             state.anchorY: ${state.anchorY}<br>
             state.zoom: ${state.zoom}<br>
@@ -483,6 +581,8 @@ if (DEBUG) { // debug
             undoStack.length: ${undoStack.length}<br>
             undoStack.at(-1).path.length: ${undoStack.at(-1)?.path.length}<br>
             redoStack.length: ${redoStack.length}<br>
+            mode: ${reverseMODE[String(state.mode)]}<br>
+            action: ${reverseACTION[String(state.action)]}<br>
         `;
     }
     
