@@ -82,8 +82,87 @@ let translateVelocityY = 0;
 /**
  * @typedef {{x: number, y: number}} Point
  * @typedef {{left: number, right: number, top: number, bottom: number}} Bound
- * @typedef {{path: Point[], bound: Bound}} Command
+ * @typedef {DrawCommand} Command
  */
+
+class Command {
+    run() { throw new Error('run() not overridden') }
+    undo() { throw new Error('undo() not overridden') }
+}
+
+/** @implements {Command} */
+class DrawCommand extends Command {
+    /**
+     * @param {Point[]} path 
+     * @param {Bound} bound 
+     */
+    constructor(path, bound) {
+        super();
+        /** @type {Point[]} */
+        this.path = path;
+        /** @type {Bound} */
+        this.bound = bound;
+    }
+    
+    /** @override */
+    run() {
+        // first draw
+        if (canvasBound === null) {
+            canvasBound = this.bound;
+            this.bound.left -= 1000;
+            this.bound.right += 1000;
+            this.bound.top -= 1000;
+            this.bound.bottom += 1000;
+            resize(this.bound.right - this.bound.left, this.bound.bottom - this.bound.top);
+        }
+        // out of bounds
+        else if (
+            this.bound.left < canvasBound.left || this.bound.right > canvasBound.right ||
+            this.bound.top < canvasBound.top || this.bound.bottom > canvasBound.bottom
+        ) {
+            const buffer = new OffscreenCanvas(canvas.width, canvas.height);
+            buffer.getContext('2d').drawImage(canvas, 0, 0)
+            const oldLeft = canvasBound.left, oldTop = canvasBound.top;
+            canvasBound = {
+                left: Math.min(this.bound.left - 500, canvasBound.left),
+                right: Math.max(this.bound.right + 500, canvasBound.right),
+                top: Math.min(this.bound.top - 500, canvasBound.top),
+                bottom: Math.max(this.bound.bottom + 500, canvasBound.bottom)
+            };
+            resize(canvasBound.right - canvasBound.left, canvasBound.bottom - canvasBound.top)
+            context.drawImage(buffer, oldLeft, oldTop)
+        }
+
+        context.beginPath();
+        context.moveTo(this.path[0].x, this.path[0].y);
+        for (let i = 1, l = this.path.length; i < l; ++i) {
+            context.lineTo(this.path[i].x, this.path[i].y);
+        }
+        context.stroke();
+    }
+    
+    /** @override */
+    undo() {
+        
+    }
+}
+
+const commands = {
+    /** @type {DrawCommand[]} */
+    stack: [],
+    /** @type {(path: Point[], bound: Bound) => void} */
+    draw: function(path, bound) {
+        const command = new DrawCommand(path, bound);
+        this.stack.push(command);
+        command.run();
+    },
+    undo: function() {
+        
+    },
+    redo: function() {
+        
+    }
+}
 
 /** @type {HTMLCanvasElement} */
 const canvas = document.getElementById('main');
@@ -154,10 +233,10 @@ window.addEventListener('wheel', e => e.preventDefault(), { passive: false })
 
 ////////// action recognition //////////
 document.addEventListener('keydown', e => {
-    if (e.ctrlKey && e.code === 'KeyZ') {
-        e.shiftKey ? redo() : undo();
-        return;
-    }
+    // if (e.ctrlKey && e.code === 'KeyZ') {
+    //     e.shiftKey ? redo() : undo();
+    //     return;
+    // }
     if (e.repeat) return;
     switch (e.code) {
     case 'Space':
@@ -344,10 +423,12 @@ const [onDrawStart, onDraw, onDrawEnd] = (() => {
     function onDrawEnd(e) {
         // bound: bound of path
         // undoStack[n].bound: bound of canvas
-        boundUnion(bound);
-        undoStack.push({path: path, bound: canvasBound});
-        doUndoStack();
-        redoStack.length = 0;
+        // boundUnion(bound);
+        // undoStack.push({path: path, bound: canvasBound});
+        // doUndoStack();
+        // redoStack.length = 0;
+        
+        commands.draw(path, bound);
         
         screenContext.clearRect(
             screenCanvasBound.left, screenCanvasBound.top,
