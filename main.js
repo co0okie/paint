@@ -79,6 +79,9 @@ const state = {
 let translateVelocityX = 0;
 let translateVelocityY = 0;
 
+/** @type {Command[][][]} */
+const net = [];
+
 /**
  * @typedef {{x: number, y: number}} Point
  * @typedef {{left: number, right: number, top: number, bottom: number}} Bound
@@ -108,12 +111,13 @@ class DrawCommand extends Command {
     run() {
         // first draw
         if (canvasBound === null) {
-            canvasBound = this.bound;
-            this.bound.left -= 1000;
-            this.bound.right += 1000;
-            this.bound.top -= 1000;
-            this.bound.bottom += 1000;
-            resize(this.bound.right - this.bound.left, this.bound.bottom - this.bound.top);
+            canvasBound = {
+                left: this.bound.left - 1000,
+                right: this.bound.right + 1000,
+                top: this.bound.top - 1000,
+                bottom: this.bound.bottom + 1000,
+            }
+            resize(canvasBound.right - canvasBound.left, canvasBound.bottom - canvasBound.top);
         }
         // out of bounds
         else if (
@@ -143,7 +147,8 @@ class DrawCommand extends Command {
     
     /** @override */
     undo() {
-        
+        // if not pass through too many paths: clearRect(bound), redraw all lines in bound
+        // if too many paths: redraw all chuncks passed through
     }
 }
 
