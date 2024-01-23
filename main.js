@@ -62,165 +62,89 @@ const state = {
     mode: MODE.PEN,
     /** @type {ACTION} */
     action: ACTION.NOTHING,
-    lineWidth: 3,
+    lineWidth: 1,
     color: 'white',
     
     /** @type {MODE} */
     shape: MODE.SHAPE_RECTANGLE,
-    
-    // anchor coordinate * zoom = screen cooridinate
-    zoom: 1,
-    
-    // screen coordinate
-    anchorX: window.innerWidth / 2,
-    anchorY: window.innerHeight / 2,
 }
 
 let translateVelocityX = 0;
 let translateVelocityY = 0;
 
-/** @type {Command[][][]} */
-const net = [];
-
-/**
- * @typedef {{x: number, y: number}} Point
- * @typedef {{left: number, right: number, top: number, bottom: number}} Bound
- * @typedef {DrawCommand} Command
- */
-
 class Command {
-    run() { throw new Error('run() not overridden') }
-    undo() { throw new Error('undo() not overridden') }
+    run() {}
+    undo() {}
 }
 
-/** @implements {Command} */
 class DrawCommand extends Command {
-    /**
-     * @param {Point[]} path 
-     * @param {Bound} bound 
-     */
-    constructor(path, bound) {
+    /** @param {SVGPolylineElement} polyline */
+    constructor(polyline) {
         super();
-        /** @type {Point[]} */
-        this.path = path;
-        /** @type {Bound} */
-        this.bound = bound;
+        /** @type {SVGPolylineElement} */
+        this.polyline = polyline
     }
     
-    /** @override */
     run() {
-        // first draw
-        if (canvasBound === null) {
-            canvasBound = {
-                left: this.bound.left - 1000,
-                right: this.bound.right + 1000,
-                top: this.bound.top - 1000,
-                bottom: this.bound.bottom + 1000,
-            }
-            resize(canvasBound.right - canvasBound.left, canvasBound.bottom - canvasBound.top);
-        }
-        // out of bounds
-        else if (
-            this.bound.left < canvasBound.left || this.bound.right > canvasBound.right ||
-            this.bound.top < canvasBound.top || this.bound.bottom > canvasBound.bottom
-        ) {
-            const buffer = new OffscreenCanvas(canvas.width, canvas.height);
-            buffer.getContext('2d').drawImage(canvas, 0, 0)
-            const oldLeft = canvasBound.left, oldTop = canvasBound.top;
-            canvasBound = {
-                left: Math.min(this.bound.left - 500, canvasBound.left),
-                right: Math.max(this.bound.right + 500, canvasBound.right),
-                top: Math.min(this.bound.top - 500, canvasBound.top),
-                bottom: Math.max(this.bound.bottom + 500, canvasBound.bottom)
-            };
-            resize(canvasBound.right - canvasBound.left, canvasBound.bottom - canvasBound.top)
-            context.drawImage(buffer, oldLeft, oldTop)
-        }
-
-        context.beginPath();
-        context.moveTo(this.path[0].x, this.path[0].y);
-        for (let i = 1, l = this.path.length; i < l; ++i) {
-            context.lineTo(this.path[i].x, this.path[i].y);
-        }
-        context.stroke();
+        svg.appendChild(this.polyline)
     }
     
-    /** @override */
     undo() {
-        // if not pass through too many paths: clearRect(bound), redraw all lines in bound
-        // if too many paths: redraw all chuncks passed through
+        this.polyline.remove()
     }
 }
 
 const commands = {
-    /** @type {DrawCommand[]} */
+    /** @type {Command[]} */
     stack: [],
-    /** @type {(path: Point[], bound: Bound) => void} */
-    draw: function(path, bound) {
-        const command = new DrawCommand(path, bound);
-        this.stack.push(command);
-        command.run();
+    /** @type {Command[]} */
+    redoStack: [],
+    /** @type {(command: Command) => void} */
+    push: function(command) {
+        this.stack.push(command)
+        if (this.redoStack.length) this.redoStack = []
     },
     undo: function() {
-        
+        if (this.stack.length === 0) return;
+        const top = this.stack.pop()
+        top.undo()
+        this.redoStack.push(top)
     },
     redo: function() {
-        
+        if (this.redoStack.length === 0) return;
+        const top = this.redoStack.pop()
+        top.run()
+        this.stack.push(top)
     }
 }
 
-/** @type {HTMLCanvasElement} */
-const canvas = document.getElementById('main');
-canvas.width = 0;
-canvas.height = 0;
-if (DEBUG) canvas.style.backgroundColor = '#222';
+const NS_SVG = 'http://www.w3.org/2000/svg'
 
-/** @type {Bound | null} anchor coordinate */
-let canvasBound = null;
+const svg = document.createElementNS(NS_SVG, 'svg')
+document.body.appendChild(svg)
+if (DEBUG) svg.style.backgroundColor = '#222';
 
-/** @type {CanvasRenderingContext2D} */
-const context = canvas.getContext('2d');
-context.lineWidth = 3;
-context.lineCap = 'round';
-context.lineJoin = 'round';
-context.strokeStyle = state.color;
-context.fillStyle = state.color;
+const bound = svg.viewBox.baseVal;
+bound.x = -500;
+bound.y = -500;
+bound.right = 500;
+bound.bottom = 500;
+bound.width = bound.right - bound.x;
+bound.height = bound.bottom - bound.y;
+svg.width.baseVal.newValueSpecifiedUnits(SVGLength.SVG_LENGTHTYPE_NUMBER, bound.width)
+svg.height.baseVal.newValueSpecifiedUnits(SVGLength.SVG_LENGTHTYPE_NUMBER, bound.height)
 
-/** @type {HTMLCanvasElement} */
-const screenCanvas = document.getElementById('screen');
-screenCanvas.width = window.innerWidth;
-screenCanvas.height = window.innerHeight;
-screenCanvas.style.width = `${window.innerWidth}px`;
-screenCanvas.style.height = `${window.innerHeight}px`;
-screenCanvas.style.left = '0px';
-screenCanvas.style.top = '0px';
+const matrix = svg.transform.baseVal.appendItem(svg.createSVGTransform()).matrix
+matrix.e = window.innerWidth / 2 + bound.x * matrix.a // center
+matrix.f = window.innerHeight / 2 + bound.y * matrix.d // center
 
-/** @type {Bound} anchor coordinate */
-let screenCanvasBound = {left: -Math.ceil(state.anchorX), top: -Math.ceil(state.anchorY)};
-
-/** @type {CanvasRenderingContext2D} */
-const screenContext = screenCanvas.getContext('2d');
-screenContext.lineWidth = context.lineWidth;
-screenContext.strokeStyle = DEBUG ? 'cyan' : state.color;
-screenContext.fillStyle = DEBUG ? 'cyan' : state.color;
-screenContext.lineCap = 'round';
-screenContext.lineJoin = 'round';
-screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
-
-/** @type {Command[]} */
-const undoStack = [];
-
-/** @type {Command[]} */
-const redoStack = [];
-
-
-// calculate e.clientX/Y in anchor coordinate
-let mouseX, mouseY;
+// calculate e.clientX/Y in svg coordinate
+const mouse = {};
 for (const type of ['mousemove', 'mousedown']) {
     document.addEventListener(type, e => {
-        // screen coordinte => anchor coordinate
-        mouseX = (e.clientX - state.anchorX) / state.zoom;
-        mouseY = (e.clientY - state.anchorY) / state.zoom;
+        // screen coordinte => svg coordinate
+        mouse.x = bound.x + (e.clientX - matrix.e) / matrix.a;
+        mouse.y = bound.y + (e.clientY - matrix.f) / matrix.d;
     })
 }
 
@@ -238,10 +162,10 @@ window.addEventListener('wheel', e => e.preventDefault(), { passive: false })
 
 ////////// action recognition //////////
 document.addEventListener('keydown', e => {
-    // if (e.ctrlKey && e.code === 'KeyZ') {
-    //     e.shiftKey ? redo() : undo();
-    //     return;
-    // }
+    if (e.ctrlKey && e.code === 'KeyZ') {
+        e.shiftKey ? commands.redo() : commands.undo();
+        return;
+    }
     if (e.repeat) return;
     switch (e.code) {
     case 'Space':
@@ -347,29 +271,8 @@ document.addEventListener('mousemove', e => {
 });
 
 document.addEventListener('wheel', e => {
-    // rate ** -e.deltaY
-    if (DEBUG > 1) console.log(e.deltaY);
     // f(x) = a^-bx
-    if (e.deltaY) scale(100 ** (-0.0005 * e.deltaY), e.clientX, e.clientY);
-});
-
-window.addEventListener('resize', e => {
-    screenCanvas.width = Math.ceil(window.innerWidth / state.zoom) + 1;
-    screenCanvas.height = Math.ceil(window.innerHeight / state.zoom) + 1;
-    screenCanvas.style.width = `${screenCanvas.width * state.zoom}px`;
-    screenCanvas.style.height = `${screenCanvas.height * state.zoom}px`;
-    let blockCountX = state.anchorX / state.zoom;
-    let blockCountY = state.anchorY / state.zoom;
-    screenCanvasBound.left = -Math.ceil(blockCountX);
-    screenCanvasBound.top = -Math.ceil(blockCountY);
-    screenCanvas.style.left = `${(blockCountX + screenCanvasBound.left) * state.zoom}px`;
-    screenCanvas.style.top = `${(blockCountY + screenCanvasBound.top) * state.zoom}px`;
-    screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
-    screenContext.lineWidth = state.lineWidth;
-    screenContext.strokeStyle = DEBUG ? 'cyan' : state.color;
-    screenContext.fillStyle = DEBUG ? 'cyan' : state.color;
-    screenContext.lineCap = 'round';
-    screenContext.lineJoin = 'round';
+    if (e.deltaY) scale(e);
 });
 
 window.addEventListener('beforeunload', e => {
@@ -380,65 +283,59 @@ window.addEventListener('beforeunload', e => {
 
 ////////// action handler //////////
 const [onDrawStart, onDraw, onDrawEnd] = (() => {
-    /** @type {Bound} */
-    let bound = {};
-    /** @type {Point[]} */
-    let path = [];
-    
-    function refresh() {
-        screenContext.clearRect(
-            screenCanvasBound.left, screenCanvasBound.top,
-            screenCanvas.width, screenCanvas.height
-        );
-        
-        screenContext.beginPath();
-        screenContext.moveTo(path[0].x, path[0].y);
-        for (const point of path) {
-            screenContext.lineTo(point.x, point.y);
-        }
-        screenContext.stroke();
-    }
+    // /** @type {Bound} */
+    // let bound = {};
+    /** @type {SVGPolylineElement} */
+    let polyline;
+    let lastX, lastY;
     
     /** @type {(e: MouseEvent) => void} */
     function onDrawStart(e) {
-        bound = {
-            left: Math.floor(mouseX), right: Math.ceil(mouseX),
-            top: Math.floor(mouseY), bottom: Math.ceil(mouseY)
-        };
-        path = [{x: mouseX, y: mouseY}];
+        polyline = document.createElementNS(NS_SVG, 'polyline')
+        polyline.setAttribute('stroke', state.color)
+        polyline.setAttribute('stroke-width', state.lineWidth)
+        const point = svg.createSVGPoint()
+        point.x = lastX = mouse.x
+        point.y = lastY = mouse.y
+        polyline.points.appendItem(point)
+        svg.appendChild(polyline)
     }
     
     /** @type {(e: MouseEvent) => void} */
     function onDraw(e) {
-        const dx = mouseX - path.at(-1).x;
-        const dy = mouseY - path.at(-1).y;
-        if (dx * dx + dy * dy < 3) return;
+        const dx = mouse.x - lastX;
+        const dy = mouse.y - lastY;
+        if (dx * dx + dy * dy < 1) {
+            console.log('filter');
+            return;
+        }
         
-        refresh();
+        if (mouse.x < bound.x) {
+            bound.x = mouse.x - 500;
+            svg.width.baseVal.value = bound.width = bound.right - bound.x
+            matrix.e = e.clientX + (bound.x - mouse.x) * matrix.a
+        } else if (mouse.x > bound.right) {
+            bound.right = mouse.x + 500;
+            svg.width.baseVal.value = bound.width = bound.right - bound.x
+        }
+        if (mouse.y < bound.y) {
+            bound.y = mouse.y - 500;
+            svg.height.baseVal.value = bound.height = bound.bottom - bound.y
+            matrix.f = e.clientY + (bound.y - mouse.y) * matrix.d
+        } else if (mouse.y > bound.bottom) {
+            bound.bottom = mouse.y + 500;
+            svg.height.baseVal.value = bound.height = bound.bottom - bound.y
+        }
         
-        if (mouseX < bound.left) bound.left = Math.floor(mouseX);
-        else if (mouseX > bound.right) bound.right = Math.ceil(mouseX);
-        if (mouseY < bound.top) bound.top = Math.floor(mouseY);
-        else if (mouseY > bound.bottom) bound.bottom = Math.ceil(mouseY);
-        
-        path.push({x: mouseX, y: mouseY});
+        const point = svg.createSVGPoint()
+        point.x = lastX = mouse.x
+        point.y = lastY = mouse.y
+        polyline.points.appendItem(point)
     }
     
     /** @type {(e: MouseEvent) => void} */
     function onDrawEnd(e) {
-        // bound: bound of path
-        // undoStack[n].bound: bound of canvas
-        // boundUnion(bound);
-        // undoStack.push({path: path, bound: canvasBound});
-        // doUndoStack();
-        // redoStack.length = 0;
-        
-        commands.draw(path, bound);
-        
-        screenContext.clearRect(
-            screenCanvasBound.left, screenCanvasBound.top,
-            screenCanvas.width, screenCanvas.height
-        );
+        commands.push(new DrawCommand(polyline))
     }
     
     return [onDrawStart, onDraw, onDrawEnd];
@@ -446,9 +343,7 @@ const [onDrawStart, onDraw, onDrawEnd] = (() => {
 
 /** @type {(e: MouseEvent) => void} */
 function onEraseStart(e) {
-    const path = [{x: mouseX, y: mouseY}];
-    
-    screenContext.globalCompositeOperation = 'destination-out';
+    // screenContext.globalCompositeOperation = 'destination-out';
 }
 
 /** @type {(e: MouseEvent) => void} */
@@ -457,169 +352,39 @@ function onDragStart(e) {
     document.addEventListener('mousemove', onDrag);
     document.addEventListener('newaction', e => {
         document.removeEventListener('mousemove', onDrag);
-    
-        let blockCountX = state.anchorX / state.zoom;
-        let blockCountY = state.anchorY / state.zoom;
-        screenCanvasBound.left = -Math.ceil(blockCountX);
-        screenCanvasBound.top = -Math.ceil(blockCountY);
-        screenCanvas.style.left = `${(blockCountX + screenCanvasBound.left) * state.zoom}px`;
-        screenCanvas.style.top = `${(blockCountY + screenCanvasBound.top) * state.zoom}px`;
-        screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
     }, { once: true });
-}
-
-//change canvas.width & canvas.height while keeping context
-/** @type {(width: number, height: number) => void} */
-function resize(width, height) {
-    canvas.width = width;
-    canvas.height = height;
-    canvas.style.width  = `${canvas.width  * state.zoom}px`;
-    canvas.style.height = `${canvas.height * state.zoom}px`;
-    
-    context.lineWidth   = state.lineWidth;
-    context.lineCap     =         'round';
-    context.lineJoin    =         'round';
-    context.strokeStyle =     state.color;
-    context.fillStyle   =     state.color;
-    
-    if (canvasBound === null) return;
-    
-    canvas.style.left = `${state.anchorX + canvasBound.left * state.zoom}px`;
-    canvas.style.top  = `${state.anchorY + canvasBound.top  * state.zoom}px`;
-    
-    context.translate(-canvasBound.left, -canvasBound.top);
-}
-
-// do all commands in undo stack
-function doUndoStack() {
-    context.beginPath();
-    for (let step of undoStack) {
-        context.moveTo(step.path[0].x, step.path[0].y);
-        for (let point of step.path) context.lineTo(point.x, point.y);
-    }
-    context.stroke();
-}
-
-// screen coordinte => anchor coordinate
-function toAnchor(x, y) {
-    return {x: (x - state.anchorX) / state.zoom, y: (y - state.anchorY) / state.zoom};
-}
-
-// 
-/** canvasBound = union of canvasBound and bound, will clear canvas
- * @type {(bound: Bound) => void}
- */
-function boundUnion(bound) {
-    // first draw
-    if (canvasBound === null) {
-        canvasBound = bound;
-        bound.left   -= 1000;
-        bound.right  += 1000;
-        bound.top    -= 1000;
-        bound.bottom += 1000;
-        resize(bound.right - bound.left, bound.bottom - bound.top);
-    }
-    // out of bounds
-    else if (bound.left < canvasBound.left || bound.right  > canvasBound.right ||
-             bound.top  < canvasBound.top  || bound.bottom > canvasBound.bottom) {
-        canvasBound = { // keep old canvasBound reference
-            left  : Math.min(bound.left   - 500, canvasBound.left  ),
-            right : Math.max(bound.right  + 500, canvasBound.right ),
-            top   : Math.min(bound.top    - 500, canvasBound.top   ),
-            bottom: Math.max(bound.bottom + 500, canvasBound.bottom)
-        };
-        resize(canvasBound.right - canvasBound.left, canvasBound.bottom - canvasBound.top);
-    } else {
-        context.clearRect(canvasBound.left, canvasBound.top, canvas.width, canvas.height);
-    }
-}
-
-// anchor coordinate
-function draw(path, bound) {
-    
 }
 
 /** screen coordinate
  * @type {(dx: number, dy: number) => void}
  */
 function translate(dx, dy) {
-    state.anchorX += dx;
-    state.anchorY += dy;
-    if (canvasBound !== null) {
-        canvas.style.left = `${state.anchorX + canvasBound.left * state.zoom}px`;
-        canvas.style.top = `${state.anchorY + canvasBound.top * state.zoom}px`;
-    }
+    matrix.e += dx;
+    matrix.f += dy;
 }
 
 /** screen coordinate
- * @type {(rate: number, x: number, y: number) => void}
+ * @type {(e: WheelEvent) => void}
  */
-function scale(rate, x, y) {
-    const newScaleRate = state.zoom * rate;
-    if (newScaleRate < 0.2 || newScaleRate > 100) return;
-    state.zoom = newScaleRate;
-    state.anchorX = x + rate * (state.anchorX - x);
-    state.anchorY = y + rate * (state.anchorY - y);
-    if (canvasBound !== null) {
-        canvas.style.left = `${state.anchorX + canvasBound.left * state.zoom}px`;
-        canvas.style.top  = `${state.anchorY + canvasBound.top  * state.zoom}px`;
-        canvas.style.width = `${canvas.width * state.zoom}px`;
-        canvas.style.height = `${canvas.height * state.zoom}px`;
-    }
-    
-    screenCanvas.width = Math.ceil(window.innerWidth / state.zoom) + 1;
-    screenCanvas.height = Math.ceil(window.innerHeight / state.zoom) + 1;
-    screenCanvas.style.width = `${screenCanvas.width * state.zoom}px`;
-    screenCanvas.style.height = `${screenCanvas.height * state.zoom}px`;
-    let blockCountX = state.anchorX / state.zoom;
-    let blockCountY = state.anchorY / state.zoom;
-    screenCanvasBound.left = -Math.ceil(blockCountX);
-    screenCanvasBound.top = -Math.ceil(blockCountY);
-    screenCanvas.style.left = `${(blockCountX + screenCanvasBound.left) * state.zoom}px`;
-    screenCanvas.style.top = `${(blockCountY + screenCanvasBound.top) * state.zoom}px`;
-    screenContext.setTransform(1, 0, 0, 1, -screenCanvasBound.left, -screenCanvasBound.top);
-    screenContext.lineWidth = state.lineWidth;
-    screenContext.strokeStyle = DEBUG ? 'cyan' : state.color;
-    screenContext.fillStyle = DEBUG ? 'cyan' : state.color;
-    screenContext.lineCap = 'round';
-    screenContext.lineJoin = 'round';
+function scale(e) {
+    const newScale = matrix.a * 100 ** (-0.0005 * e.deltaY);
+    if (newScale < 0.2 || newScale > 100) return;
+    matrix.a = matrix.d = newScale;
+    matrix.e = e.clientX + (bound.x - mouse.x) * matrix.a
+    matrix.f = e.clientY + (bound.y - mouse.y) * matrix.d
 }
 
-function undo() {
-    if (undoStack.length === 0) return;
-    
-    redoStack.push(undoStack.pop());
-    
-    if (undoStack.length === 0) {
-        // reset canvas
-        canvasBound = null;
-        resize(0, 0);
-        return;
-    }
-    
-    const bound = undoStack.at(-1).bound;
-    if (bound !== canvasBound) {
-        canvasBound = bound;
-        resize(bound.right - bound.left, bound.bottom - bound.top);
-    } else {
-        context.clearRect(bound.left, bound.top, canvas.width, canvas.height);
-    }
-    
-    doUndoStack();
-}
-
-function redo() {
-    if (redoStack.length === 0) return;
-    
-    const command = redoStack.pop();
-    canvasBound = command.bound;
-    resize(canvasBound.right - canvasBound.left, canvasBound.bottom - canvasBound.top);
-    undoStack.push(command);
-    doUndoStack();
-}
-
-if (DEBUG) { // debug
-    const debugInfo = document.getElementById('debug');
+if (DEBUG) {
+    const debug = document.createElement('div');
+    document.body.appendChild(debug)
+    debug.style.position = 'fixed';
+    debug.style.top = '0';
+    debug.style.left = '0';
+    debug.style.fontSize = '20px';
+    debug.style.color = 'white';
+    debug.style.userSelect = 'none';
+    debug.style.zIndex = '1';
+    debug.style.backgroundColor = '#00000080';
     
     const anchorPoint = document.createElement('div');
     anchorPoint.style.backgroundColor = 'red';
@@ -634,39 +399,25 @@ if (DEBUG) { // debug
     const reverseACTION = Object.fromEntries(Object.entries(ACTION).map(([k, v]) => [v, k]))
     
     function updateDebugInfo(e) {
-        anchorPoint.style.left = `${state.anchorX}px`;
-        anchorPoint.style.top = `${state.anchorY}px`;
-        debugInfo.innerHTML = `
+        anchorPoint.style.left = `${matrix.e - bound.x * matrix.a}px`;
+        anchorPoint.style.top = `${matrix.f - bound.y * matrix.d}px`;
+        debug.innerHTML = `
             e.clientX: ${e.clientX}<br>
             e.clientY: ${e.clientY}<br>
-            mouseAnchorX: ${mouseX}<br>
-            mouseAnchorY: ${mouseY}<br>
-            state.anchorX: ${state.anchorX}<br>
-            state.anchorY: ${state.anchorY}<br>
-            state.zoom: ${state.zoom}<br>
-            canvas.width: ${canvas.width}<br>
-            canvas.height: ${canvas.height}<br>
-            canvas.offsetWidth: ${canvas.offsetWidth}<br>
-            canvas.offsetHeight: ${canvas.offsetHeight}<br>
-            canvas.offsetLeft: ${canvas.offsetLeft}<br>
-            canvas.offsetTop: ${canvas.offsetTop}<br>
-            canvasBound.left: ${canvasBound?.left}<br>
-            canvasBound.right: ${canvasBound?.right}<br>
-            canvasBound.top: ${canvasBound?.top}<br>
-            canvasBound.bottom: ${canvasBound?.bottom}<br>
-            screenCanvas.width: ${screenCanvas.width}<br>
-            screenCanvas.height: ${screenCanvas.height}<br>
-            screenCanvas.offsetWidth: ${screenCanvas.offsetWidth}<br>
-            screenCanvas.offsetHeight: ${screenCanvas.offsetHeight}<br>
-            screenCanvas.offsetLeft: ${screenCanvas.offsetLeft}<br>
-            screenCanvas.offsetTop: ${screenCanvas.offsetTop}<br>
-            screenCanvasBound.left: ${screenCanvasBound.left}<br>
-            screenCanvasBound.top: ${screenCanvasBound.top}<br>
+            mouse.x: ${mouse.x?.toFixed(2)}<br>
+            mouse.y: ${mouse.y?.toFixed(2)}<br>
+            bound.x: ${bound.x.toFixed(2)}<br>
+            bound.y: ${bound.y.toFixed(2)}<br>
+            bound.right: ${bound.right.toFixed(2)}<br>
+            bound.bottom: ${bound.bottom.toFixed(2)}<br>
+            bound.width: ${bound.width.toFixed(2)}<br>
+            bound.height: ${bound.height.toFixed(2)}<br>
+            matrix.a: ${matrix.a.toFixed(2)}<br>
+            matrix.d: ${matrix.d.toFixed(2)}<br>
+            matrix.e: ${matrix.e.toFixed(2)}<br>
+            matrix.f: ${matrix.f.toFixed(2)}<br>
             window.innerWidth: ${window.innerWidth}<br>
             window.innerHeight: ${window.innerHeight}<br>
-            undoStack.length: ${undoStack.length}<br>
-            undoStack.at(-1).path.length: ${undoStack.at(-1)?.path.length}<br>
-            redoStack.length: ${redoStack.length}<br>
             mode: ${reverseMODE[String(state.mode)]}<br>
             action: ${reverseACTION[String(state.action)]}<br>
         `;
