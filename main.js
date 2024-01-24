@@ -72,25 +72,52 @@ const state = {
 let translateVelocityX = 0;
 let translateVelocityY = 0;
 
-class Command {
-    run() {}
-    undo() {}
-}
+// class Command {
+//     run() {}
+//     undo() {}
+// }
 
-class DrawCommand extends Command {
+/**
+ * @typedef {Object} Command
+ * @property {() => void} run
+ * @property {() => void} undo
+ */
+
+/** @implements {Command} */
+class DrawCommand {
     /** @param {SVGPolylineElement} polyline */
     constructor(polyline) {
-        super();
         /** @type {SVGPolylineElement} */
         this.polyline = polyline
     }
     
+    /** @override */
     run() {
         svg.appendChild(this.polyline)
     }
     
+    /** @override */
     undo() {
         this.polyline.remove()
+    }
+}
+
+/** @implements {Command} */
+class EraseCommand {
+    /** @param {SVGElement} element */
+    constructor(element) {
+        /** @type {SVGElement} */
+        this.element = element
+    }
+    
+    /** @override */
+    run() {
+        this.element.style.display = 'none'
+    }
+    
+    /** @override */
+    undo() {
+        this.element.style.removeProperty('display')
     }
 }
 
@@ -230,6 +257,7 @@ document.addEventListener('mousedown', e => {
         break;
     case MODE.ERASER:
         if (e.button === 0) {
+            onEraseStart(e)
             state.action = ACTION.ERASING;
         }
         break;
@@ -254,20 +282,10 @@ document.addEventListener('mousedown', e => {
 });
 
 document.addEventListener('newaction', e => {
-    switch (state.action) {
-    case ACTION.DRAWING:
-        onDrawEnd(e);
-        break;
-    }
     state.action = ACTION.NOTHING;
 })
 
 document.addEventListener('mousemove', e => {
-    switch (state.action) {
-    case ACTION.DRAWING:
-        onDraw(e);
-        break;
-    }
 });
 
 document.addEventListener('wheel', e => {
@@ -282,33 +300,25 @@ window.addEventListener('beforeunload', e => {
 })
 
 ////////// action handler //////////
-const [onDrawStart, onDraw, onDrawEnd] = (() => {
-    // /** @type {Bound} */
-    // let bound = {};
+function onDrawStart(e) {
     /** @type {SVGPolylineElement} */
     let polyline;
     let lastX, lastY;
     
-    /** @type {(e: MouseEvent) => void} */
-    function onDrawStart(e) {
-        polyline = document.createElementNS(NS_SVG, 'polyline')
-        polyline.setAttribute('stroke', state.color)
-        polyline.setAttribute('stroke-width', state.lineWidth)
-        const point = svg.createSVGPoint()
-        point.x = lastX = mouse.x
-        point.y = lastY = mouse.y
-        polyline.points.appendItem(point)
-        svg.appendChild(polyline)
-    }
+    polyline = document.createElementNS(NS_SVG, 'polyline')
+    polyline.setAttribute('stroke', state.color)
+    polyline.setAttribute('stroke-width', state.lineWidth)
+    const point = svg.createSVGPoint()
+    point.x = lastX = mouse.x
+    point.y = lastY = mouse.y
+    polyline.points.appendItem(point)
+    svg.appendChild(polyline)
     
     /** @type {(e: MouseEvent) => void} */
     function onDraw(e) {
         const dx = mouse.x - lastX;
         const dy = mouse.y - lastY;
-        if (dx * dx + dy * dy < 1) {
-            console.log('filter');
-            return;
-        }
+        if (dx * dx + dy * dy < 1) return;
         
         if (mouse.x < bound.x) {
             bound.x = mouse.x - 500;
@@ -333,17 +343,24 @@ const [onDrawStart, onDraw, onDrawEnd] = (() => {
         polyline.points.appendItem(point)
     }
     
-    /** @type {(e: MouseEvent) => void} */
-    function onDrawEnd(e) {
-        commands.push(new DrawCommand(polyline))
-    }
+    document.addEventListener('mousemove', onDraw)
     
-    return [onDrawStart, onDraw, onDrawEnd];
-})()
+    document.addEventListener('newaction', () => {
+        document.removeEventListener('mousemove', onDraw)
+        commands.push(new DrawCommand(polyline))
+    }, {once: true})
+}
 
 /** @type {(e: MouseEvent) => void} */
 function onEraseStart(e) {
-    // screenContext.globalCompositeOperation = 'destination-out';
+    function onErase(e) {
+        if (e.target.tagName !== 'polyline') return;
+        const command = new EraseCommand(e.target);
+        command.run();
+        commands.push(command)
+    }
+    svg.addEventListener('mouseover', onErase)
+    document.addEventListener('newaction', () => svg.removeEventListener('mouseover', onErase), {once: true})
 }
 
 /** @type {(e: MouseEvent) => void} */
