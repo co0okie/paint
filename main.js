@@ -104,20 +104,20 @@ class DrawCommand {
 
 /** @implements {Command} */
 class EraseCommand {
-    /** @param {SVGElement} element */
-    constructor(element) {
-        /** @type {SVGElement} */
-        this.element = element
+    /** @param {SVGElement[]} elements */
+    constructor(elements) {
+        /** @type {SVGElement[]} */
+        this.elements = elements
     }
     
     /** @override */
     run() {
-        this.element.style.display = 'none'
+        for (const element of this.elements) element.style.display = 'none'
     }
     
     /** @override */
     undo() {
-        this.element.style.removeProperty('display')
+        for (const element of this.elements) element.style.removeProperty('display')
     }
 }
 
@@ -147,8 +147,9 @@ const commands = {
 
 const NS_SVG = 'http://www.w3.org/2000/svg'
 
-const svg = document.createElementNS(NS_SVG, 'svg')
-document.body.appendChild(svg)
+/** @type {SVGSVGElement} */
+const svg = document.querySelector('svg')
+// document.body.appendChild(svg)
 if (DEBUG) svg.style.backgroundColor = '#222';
 
 const bound = svg.viewBox.baseVal;
@@ -194,6 +195,10 @@ document.addEventListener('keydown', e => {
         return;
     }
     if (e.repeat) return;
+    if (e.ctrlKey && e.code === 'KeyS') {
+        e.preventDefault()
+        downloadSVG()
+    }
     switch (e.code) {
     case 'Space':
         state.mode = MODE.SELECT;
@@ -290,7 +295,7 @@ document.addEventListener('mousemove', e => {
 
 document.addEventListener('wheel', e => {
     // f(x) = a^-bx
-    if (e.deltaY) scale(e);
+    if (e.deltaY) scale(100 ** (-0.0005 * e.deltaY), e.clientX, e.clientY, mouse.x, mouse.y);
 });
 
 window.addEventListener('beforeunload', e => {
@@ -300,7 +305,7 @@ window.addEventListener('beforeunload', e => {
 })
 
 ////////// action handler //////////
-function onDrawStart(e) {
+function onDrawStart() {
     /** @type {SVGPolylineElement} */
     let polyline;
     let lastX, lastY;
@@ -351,20 +356,24 @@ function onDrawStart(e) {
     }, {once: true})
 }
 
-/** @type {(e: MouseEvent) => void} */
-function onEraseStart(e) {
+function onEraseStart() {
+    /** @type {SVGElement[]} */
+    const elements = [];
+    /** @param {MouseEvent} e */
     function onErase(e) {
         if (e.target.tagName !== 'polyline') return;
-        const command = new EraseCommand(e.target);
-        command.run();
-        commands.push(command)
+        e.target.style.display = 'none';
+        elements.push(e.target)
     }
     svg.addEventListener('mouseover', onErase)
-    document.addEventListener('newaction', () => svg.removeEventListener('mouseover', onErase), {once: true})
+    document.addEventListener('newaction', () => {
+        svg.removeEventListener('mouseover', onErase)
+        if (elements.length) commands.push(new EraseCommand(elements))
+    }, {once: true})
 }
 
 /** @type {(e: MouseEvent) => void} */
-function onDragStart(e) {
+function onDragStart() {
     const onDrag = e => translate(e.movementX, e.movementY);
     document.addEventListener('mousemove', onDrag);
     document.addEventListener('newaction', e => {
@@ -380,15 +389,36 @@ function translate(dx, dy) {
     matrix.f += dy;
 }
 
-/** screen coordinate
- * @type {(e: WheelEvent) => void}
+/**
+ * screen coordinate
+ * @param {number} rate
+ * @param {number} clientX
+ * @param {number} clientY
+ * @param {number} mouseX
+ * @param {number} mouseY
  */
-function scale(e) {
-    const newScale = matrix.a * 100 ** (-0.0005 * e.deltaY);
+function scale(rate, clientX, clientY, mouseX, mouseY) {
+    const newScale = matrix.a * rate;
     if (newScale < 0.2 || newScale > 100) return;
     matrix.a = matrix.d = newScale;
-    matrix.e = e.clientX + (bound.x - mouse.x) * matrix.a
-    matrix.f = e.clientY + (bound.y - mouse.y) * matrix.d
+    matrix.e = clientX + (bound.x - mouseX) * matrix.a
+    matrix.f = clientY + (bound.y - mouseY) * matrix.d
+}
+
+function downloadSVG() {
+    /** @type {SVGSVGElement} */
+    const copy = svg.cloneNode(true)
+    copy.removeAttribute('style')
+    copy.removeAttribute('width')
+    copy.removeAttribute('height')
+    copy.removeAttribute('transform')
+    const bbox = svg.getBBox()
+    copy.setAttribute('viewBox', `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`)
+    const a = document.createElement('a')
+    a.download = 'image.svg'
+    a.href = "data:image/svg+xml;charset=utf-8," +
+        encodeURIComponent(new XMLSerializer().serializeToString(copy))
+    a.dispatchEvent(new MouseEvent('click'))
 }
 
 if (DEBUG) {
