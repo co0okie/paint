@@ -197,7 +197,11 @@ document.addEventListener('keydown', e => {
     if (e.repeat) return;
     if (e.ctrlKey && e.code === 'KeyS') {
         e.preventDefault()
-        downloadSVG()
+        saveSVG()
+    }
+    if (e.ctrlKey && e.code === 'KeyO') {
+        e.preventDefault()
+        loadSVG()
     }
     switch (e.code) {
     case 'Space':
@@ -305,25 +309,28 @@ window.addEventListener('beforeunload', e => {
 })
 
 ////////// action handler //////////
-function onDrawStart() {
+/** @param {MouseEvent} e */
+function onDrawStart(e) {
     /** @type {SVGPolylineElement} */
     let polyline;
-    let lastX, lastY;
+    let lastX = e.clientX, lastY = e.clientY;
     
     polyline = document.createElementNS(NS_SVG, 'polyline')
     polyline.setAttribute('stroke', state.color)
     polyline.setAttribute('stroke-width', state.lineWidth)
     const point = svg.createSVGPoint()
-    point.x = lastX = mouse.x
-    point.y = lastY = mouse.y
+    point.x = mouse.x
+    point.y = mouse.y
     polyline.points.appendItem(point)
     svg.appendChild(polyline)
     
     /** @type {(e: MouseEvent) => void} */
     function onDraw(e) {
-        const dx = mouse.x - lastX;
-        const dy = mouse.y - lastY;
-        if (dx * dx + dy * dy < 1) return;
+        const dx = e.clientX - lastX;
+        const dy = e.clientY - lastY;
+        if (dx * dx + dy * dy < 20) return;
+        lastX = e.clientX
+        lastY = e.clientY
         
         if (mouse.x < bound.x) {
             bound.x = mouse.x - 500;
@@ -343,8 +350,8 @@ function onDrawStart() {
         }
         
         const point = svg.createSVGPoint()
-        point.x = lastX = mouse.x
-        point.y = lastY = mouse.y
+        point.x = mouse.x
+        point.y = mouse.y
         polyline.points.appendItem(point)
     }
     
@@ -405,20 +412,46 @@ function scale(rate, clientX, clientY, mouseX, mouseY) {
     matrix.f = clientY + (bound.y - mouseY) * matrix.d
 }
 
-function downloadSVG() {
+function saveSVG() {
     /** @type {SVGSVGElement} */
     const copy = svg.cloneNode(true)
     copy.removeAttribute('style')
-    copy.removeAttribute('width')
-    copy.removeAttribute('height')
-    copy.removeAttribute('transform')
+    copy.style.backgroundColor = 'black'
+    copy.transform.baseVal.clear()
+    for (const hidden of copy.querySelectorAll('[display="none"]')) hidden.remove()
     const bbox = svg.getBBox()
     copy.setAttribute('viewBox', `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`)
+    copy.width.baseVal.value = bbox.width
+    copy.height.baseVal.value = bbox.height
     const a = document.createElement('a')
     a.download = 'image.svg'
     a.href = "data:image/svg+xml;charset=utf-8," +
         encodeURIComponent(new XMLSerializer().serializeToString(copy))
-    a.dispatchEvent(new MouseEvent('click'))
+    if (DEBUG) console.log(a.href);
+    a.click()
+}
+
+function loadSVG() {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.svg'
+    input.onchange = e => {
+        const reader = new FileReader()
+        const div = document.createElement('div')
+        reader.onload = () => {
+            div.innerHTML = reader.result
+            svg.innerHTML = div.firstChild.innerHTML
+            const tempBound = div.firstChild.viewBox.baseVal
+            bound.x = tempBound.x - 1000
+            bound.right = tempBound.x + tempBound.width + 1000
+            bound.y = tempBound.y - 1000
+            bound.bottom = tempBound.y + tempBound.height + 1000
+            svg.width.baseVal.value = bound.width = bound.right - bound.x
+            svg.height.baseVal.value = bound.height = bound.bottom - bound.y
+        }
+        reader.readAsText(e.target.files[0])
+    }
+    input.click()
 }
 
 if (DEBUG) {
@@ -431,7 +464,7 @@ if (DEBUG) {
     debug.style.color = 'white';
     debug.style.userSelect = 'none';
     debug.style.zIndex = '1';
-    debug.style.backgroundColor = '#00000080';
+    debug.style.backgroundColor = '#00000040';
     
     const anchorPoint = document.createElement('div');
     anchorPoint.style.backgroundColor = 'red';
