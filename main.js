@@ -26,9 +26,202 @@ setting:
     G + wheel: width
 */
 
+// cast 'newaction' event if click, scroll, press any key or resize
+/** @typedef {{detail: KeyboardEvent | MouseEvent | WheelEvent | UIEvent}} NewActionEvent */
+for (const type of ['keydown', 'keyup', 'mousedown', 'mouseup', 'wheel']) {
+    document.addEventListener(type, e => {
+        if (e.key === 'Alt' || e.key === 'Control' || e.key === 'Shift') return;
+        if (e.repeat) return; // prevent long press repeated fire
+        document.dispatchEvent(new CustomEvent('newaction', { detail: e }));
+    });
+}
+window.addEventListener('resize', e => document.dispatchEvent(new CustomEvent('newaction', { detail: e })));
+window.addEventListener('wheel', e => e.preventDefault(), { passive: false })
+
+document.addEventListener('mousemove', /** @type {MouseEvent} */ e => {
+    cursor.matrix.e = e.clientX
+    cursor.matrix.f = e.clientY
+})
+document.addEventListener('keydown', /** @type {KeyboardEvent} */ e => {
+    if (e.ctrlKey && e.code === 'KeyZ') {
+        e.shiftKey ? commands.redo() : commands.undo();
+        return;
+    }
+    if (e.repeat) return;
+    if (e.ctrlKey && e.code === 'KeyS') {
+        e.preventDefault()
+        saveSVG()
+        return;
+    }
+    if (e.ctrlKey && e.code === 'KeyO') {
+        e.preventDefault()
+        loadSVG()
+        return;
+    }
+    const mode = ({
+        'KeyZ': penMode,
+        'KeyX': eraseMode,
+    })[e.code]
+    if (mode && state.mode !== mode) {
+        state.mode.exit()
+        state.mode = mode
+        state.mode.enter()
+    };
+})
+document.addEventListener('mousedown', /** @type {MouseEvent} */ e => {
+    if (e.button === 1) onDragStart(e)
+})
+document.addEventListener('wheel', /** @type {WheelEvent} */ e => {
+    // f(x) = a^-bx
+    if (e.deltaY) scale(100 ** (-0.0005 * e.deltaY), e.clientX, e.clientY, mouse.x, mouse.y);
+})
+window.addEventListener('beforeunload', /** @type {BeforeUnloadEvent} */ e => {
+    if (DEBUG) return;
+    e.preventDefault()
+    return ''
+})
+
+// calculate e.clientX/Y in svg coordinate
+const mouse = {};
+for (const type of ['mousemove', 'mousedown']) {
+    document.addEventListener(type, e => {
+        // screen coordinte => svg coordinate
+        mouse.x = bound.x + (e.clientX - matrix.e) / matrix.a;
+        mouse.y = bound.y + (e.clientY - matrix.f) / matrix.d;
+    })
+}
+
+////////// command //////////
+/** @interface */
+class Command {
+    run() {}
+    undo() {}
+}
+
+/** @implements {Command} */
+class DrawCommand {
+    /** @param {SVGPolylineElement} polyline */
+    constructor(polyline) {
+        /** @type {SVGPolylineElement} */
+        this.polyline = polyline
+    }
+    
+    run() {
+        svg.appendChild(this.polyline)
+    }
+    
+    undo() {
+        this.polyline.remove()
+    }
+}
+
+/** @implements {Command} */
+class EraseCommand {
+    /** @param {Array<SVGElement>} elements */
+    constructor(elements) {
+        /** @type {Array<SVGElement>} */
+        this.elements = elements
+    }
+    
+    run() {
+        for (const element of this.elements) element.style.display = 'none'
+    }
+    
+    undo() {
+        for (const element of this.elements) element.style.removeProperty('display')
+    }
+}
+
+const commands = {
+    /** @type {Array<Command>} */
+    stack: [],
+    /** @type {Array<Command>} */
+    redoStack: [],
+    /** @param {Command} command */
+    push(command) {
+        this.stack.push(command)
+        if (this.redoStack.length) this.redoStack = []
+    },
+    undo() {
+        if (this.stack.length === 0) return;
+        const top = this.stack.pop()
+        top.undo()
+        this.redoStack.push(top)
+    },
+    redo() {
+        if (this.redoStack.length === 0) return;
+        const top = this.redoStack.pop()
+        top.run()
+        this.stack.push(top)
+    }
+}
+
 ////////// mode //////////
+/** 
+ * @typedef {Object} Mode
+ * @property {function(): void} enter
+ * @property {function(): void} exit
+ */
+
+/** @type {Mode} */
+const penMode = {
+    enter() {
+        cursor.pen.setAttribute('fill', `${state.color}`)
+        cursor.matrix.a = cursor.matrix.d = state.lineWidth * matrix.a
+        cursor.svg.appendChild(cursor.pen)
+        
+        document.addEventListener('mousedown', this.onMousedown)
+        document.addEventListener('keydown', this.onKeydown)
+        document.addEventListener('wheel', this.onWheel)
+    },
+    exit() {
+        document.removeEventListener('mousedown', this.onMousedown)
+        document.removeEventListener('keydown', this.onKeydown)
+        document.removeEventListener('wheel', this.onWheel)
+        
+        cursor.pen.remove()
+    },
+    onMousedown(/** @type {MouseEvent} */ e) {
+        if (e.button === 0) {
+            onDrawStart(e);
+        }
+    },
+    onKeydown(/** @type {KeyboardEvent} */ e) {
+        
+    },
+    onWheel(/** @type {WheelEvent} */ e) {
+        if (!e.deltaY) return;
+        cursor.matrix.a = cursor.matrix.d = state.lineWidth * matrix.a
+    }
+}
+
+/** @type {Mode} */
+const eraseMode = {
+    enter() {
+        cursor.matrix.a = cursor.matrix.d = 50
+        cursor.svg.appendChild(cursor.eraser)
+        
+        document.addEventListener('mousedown', this.onMousedown)
+        document.addEventListener('keydown', this.onKeydown)
+    },
+    exit() {
+        document.removeEventListener('mousedown', this.onMousedown)
+        document.removeEventListener('keydown', this.onKeydown)
+        
+        cursor.eraser.remove()
+    },
+    onMousedown(e) {
+        if (e.button === 0) {
+            onEraseStart(e);
+        }
+    },
+    onKeydown(e) {
+        
+    }
+}
+
 /** @enum {number} */
-const MODE = Object.freeze({
+const MODE = {
     SELECT: 0,
     PEN: 10,
     ERASER: 20,
@@ -36,12 +229,11 @@ const MODE = Object.freeze({
     SHAPE_ELLIPSE: 31,
     SHAPE_TRIANGLE: 32,
     FLOOD_FILL: 40
-})
-
+}
 
 ////////// action //////////
 /** @enum {number} */
-const ACTION = Object.freeze({
+const ACTION = {
     NOTHING: 0,
     DRAGING: 1,
     TRANSLATING: 2,
@@ -54,95 +246,6 @@ const ACTION = Object.freeze({
     HELP_PAGE: 100,
     PALETTE: 101,
     LINE_WIDTH: 102,
-})
-
-////////// status //////////
-const state = {
-    /** @type {MODE} */
-    mode: MODE.PEN,
-    /** @type {ACTION} */
-    action: ACTION.NOTHING,
-    lineWidth: 1,
-    color: 'white',
-    
-    /** @type {MODE} */
-    shape: MODE.SHAPE_RECTANGLE,
-}
-
-let translateVelocityX = 0;
-let translateVelocityY = 0;
-
-// class Command {
-//     run() {}
-//     undo() {}
-// }
-
-/**
- * @typedef {Object} Command
- * @property {() => void} run
- * @property {() => void} undo
- */
-
-/** @implements {Command} */
-class DrawCommand {
-    /** @param {SVGPolylineElement} polyline */
-    constructor(polyline) {
-        /** @type {SVGPolylineElement} */
-        this.polyline = polyline
-    }
-    
-    /** @override */
-    run() {
-        svg.appendChild(this.polyline)
-    }
-    
-    /** @override */
-    undo() {
-        this.polyline.remove()
-    }
-}
-
-/** @implements {Command} */
-class EraseCommand {
-    /** @param {SVGElement[]} elements */
-    constructor(elements) {
-        /** @type {SVGElement[]} */
-        this.elements = elements
-    }
-    
-    /** @override */
-    run() {
-        for (const element of this.elements) element.style.display = 'none'
-    }
-    
-    /** @override */
-    undo() {
-        for (const element of this.elements) element.style.removeProperty('display')
-    }
-}
-
-const commands = {
-    /** @type {Command[]} */
-    stack: [],
-    /** @type {Command[]} */
-    redoStack: [],
-    /** @type {(command: Command) => void} */
-    push: function(command) {
-        this.stack.push(command)
-        if (this.redoStack.length) this.redoStack = []
-    },
-    undo: function() {
-        if (this.stack.length === 0) return;
-        const top = this.stack.pop()
-        top.undo()
-        this.redoStack.push(top)
-    },
-    redo: function() {
-        if (this.redoStack.length === 0) return;
-        const top = this.redoStack.pop()
-        top.run()
-        this.stack.push(top)
-    }
 }
 
 const NS_SVG = 'http://www.w3.org/2000/svg'
@@ -166,162 +269,59 @@ const matrix = svg.transform.baseVal.appendItem(svg.createSVGTransform()).matrix
 matrix.e = window.innerWidth / 2 + bound.x * matrix.a // center
 matrix.f = window.innerHeight / 2 + bound.y * matrix.d // center
 
-// calculate e.clientX/Y in svg coordinate
-const mouse = {};
-for (const type of ['mousemove', 'mousedown']) {
-    document.addEventListener(type, e => {
-        // screen coordinte => svg coordinate
-        mouse.x = bound.x + (e.clientX - matrix.e) / matrix.a;
-        mouse.y = bound.y + (e.clientY - matrix.f) / matrix.d;
-    })
+
+////////// status //////////
+const state = {
+    /** @type {Mode} */
+    mode: penMode,
+    /** @type {ACTION} */
+    action: ACTION.NOTHING,
+    lineWidth: 3,
+    color: 'white',
+    
+    /** @type {MODE} */
+    shape: MODE.SHAPE_RECTANGLE,
 }
 
-// cast 'newaction' event if click, scroll, press any key or resize
-/** @typedef {{detail: KeyboardEvent | MouseEvent | WheelEvent | UIEvent}} NewActionEvent */
-for (const type of ['keydown', 'keyup', 'mousedown', 'mouseup', 'wheel']) {
-    document.addEventListener(type, e => {
-        if (e.key === 'Alt' || e.key === 'Control' || e.key === 'Shift') return;
-        if (e.repeat) return; // prevent long press repeated fire
-        document.dispatchEvent(new CustomEvent('newaction', { detail: e }));
-    });
+const cursor = {
+    svg: document.createElementNS(NS_SVG, 'svg'),
+    /** @type {SVGMatrix} */
+    matrix: null,
+    pen: document.createElementNS(NS_SVG, 'circle'),
+    /** @type {SVGGElement} */
+    eraser: document.createElementNS(NS_SVG, 'g')
 }
-window.addEventListener('resize', e => document.dispatchEvent(new CustomEvent('newaction', { detail: e })));
-window.addEventListener('wheel', e => e.preventDefault(), { passive: false })
+cursor.svg.id = 'cursor'
+cursor.svg.width.baseVal.newValueSpecifiedUnits(SVGLength.SVG_LENGTHTYPE_NUMBER, 1)
+cursor.svg.height.baseVal.newValueSpecifiedUnits(SVGLength.SVG_LENGTHTYPE_NUMBER, 1)
+cursor.matrix = cursor.svg.transform.baseVal.appendItem(cursor.svg.createSVGTransform()).matrix
+cursor.pen.cx.baseVal.value = 0.5
+cursor.pen.cy.baseVal.value = 0.5
+cursor.pen.r.baseVal.value = 0.5
+cursor.eraser.setAttribute('transform', 'rotate(45, 0.5, 0.5) translate(0.5, 0.356)')
+cursor.eraser.setAttribute('stroke', 'white')
+cursor.eraser.setAttribute('stroke-width', '0.03')
+cursor.eraser.setAttribute('fill', 'none')
+cursor.eraser.innerHTML = '<rect width="0.466" height="0.288" rx="0.05"/><line x1="0.12" y1="0" x2="0.12" y2="0.288"/><line x1="0.12" y1="0.088" x2="0.466" y2="0.088"/><line x1="0.12" y1="0.2" x2="0.466" y2="0.2"/>'
+document.body.appendChild(cursor.svg)
 
-////////// action recognition //////////
-document.addEventListener('keydown', e => {
-    if (e.ctrlKey && e.code === 'KeyZ') {
-        e.shiftKey ? commands.redo() : commands.undo();
-        return;
-    }
-    if (e.repeat) return;
-    if (e.ctrlKey && e.code === 'KeyS') {
-        e.preventDefault()
-        saveSVG()
-    }
-    if (e.ctrlKey && e.code === 'KeyO') {
-        e.preventDefault()
-        loadSVG()
-    }
-    switch (e.code) {
-    case 'Space':
-        state.mode = MODE.SELECT;
-        break;
-    case 'KeyZ':
-        state.mode = MODE.PEN;
-        break;
-    case 'KeyX':
-        state.mode = MODE.ERASER;
-        break;
-    case 'KeyC':
-        state.action = ACTION.SELECTING_SHAPE;
-        break;
-    case 'KeyV':
-        state.mode = MODE.FLOOD_FILL;
-        break;
-    case 'KeyW':
-        translateVelocityY = -1;
-        state.action = ACTION.TRANSLATING;
-        break;
-    case 'KeyA':
-        translateVelocityX = -1;
-        state.action = ACTION.TRANSLATING;
-        break;
-    case 'KeyS':
-        translateVelocityY = 1;
-        state.action = ACTION.TRANSLATING;
-        break;
-    case 'KeyD':
-        translateVelocityX = 1;
-        state.action = ACTION.TRANSLATING;
-        break;
-    case 'KeyE':
-        state.action = ACTION.ZOOM_IN;
-        break;
-    case 'KeyQ':
-        state.action = ACTION.ZOOM_OUT;
-        break;
-    case 'KeyF':
-        state.action = ACTION.PALETTE;
-        break;
-    case 'KeyG':
-        state.action = ACTION.LINE_WIDTH;
-        break;
-    }
-});
-
-document.addEventListener('mousedown', e => {
-    if (e.button === 1) {
-        onDragStart(e)
-        state.action = ACTION.DRAGING;
-    }
-    switch (state.mode) {
-    case MODE.SELECT:
-        break;
-    case MODE.PEN:
-        if (e.button === 0) {
-            onDrawStart(e);
-            state.action = ACTION.DRAWING;
-        }
-        break;
-    case MODE.ERASER:
-        if (e.button === 0) {
-            onEraseStart(e)
-            state.action = ACTION.ERASING;
-        }
-        break;
-    case MODE.SHAPE_RECTANGLE:
-        if (e.button === 0) {
-            state.action = ACTION.DRAWING_SHAPE;
-        }
-        break;
-    case MODE.SHAPE_ELLIPSE:
-        if (e.button === 0) {
-            state.action = ACTION.DRAWING_SHAPE;
-        }
-        break;
-    case MODE.SHAPE_TRIANGLE:
-        if (e.button === 0) {
-            state.action = ACTION.DRAWING_SHAPE;
-        }
-        break;
-    case MODE.FLOOD_FILL:
-        break;
-    }
-});
-
-document.addEventListener('newaction', e => {
-    state.action = ACTION.NOTHING;
-})
-
-document.addEventListener('mousemove', e => {
-});
-
-document.addEventListener('wheel', e => {
-    // f(x) = a^-bx
-    if (e.deltaY) scale(100 ** (-0.0005 * e.deltaY), e.clientX, e.clientY, mouse.x, mouse.y);
-});
-
-window.addEventListener('beforeunload', e => {
-    if (DEBUG) return;
-    e.preventDefault()
-    return ''
-})
+state.mode.enter()
 
 ////////// action handler //////////
 /** @param {MouseEvent} e */
 function onDrawStart(e) {
     /** @type {SVGPolylineElement} */
-    let polyline;
-    let lastX = e.clientX, lastY = e.clientY;
-    
-    polyline = document.createElementNS(NS_SVG, 'polyline')
+    const polyline = document.createElementNS(NS_SVG, 'polyline');
+    const points = polyline.points;
     polyline.setAttribute('stroke', state.color)
     polyline.setAttribute('stroke-width', state.lineWidth)
+    
+    let lastX = e.clientX, lastY = e.clientY;
+    
     const point = svg.createSVGPoint()
     point.x = mouse.x
     point.y = mouse.y
-    polyline.points.appendItem(point)
+    points.appendItem(point)
     svg.appendChild(polyline)
     
     /** @type {(e: MouseEvent) => void} */
@@ -352,19 +352,21 @@ function onDrawStart(e) {
         const point = svg.createSVGPoint()
         point.x = mouse.x
         point.y = mouse.y
-        polyline.points.appendItem(point)
+        points.appendItem(point)
     }
     
     document.addEventListener('mousemove', onDraw)
     
     document.addEventListener('newaction', () => {
         document.removeEventListener('mousemove', onDraw)
+        if (points.length === 1) points.appendItem(points.getItem(0))
         commands.push(new DrawCommand(polyline))
     }, {once: true})
 }
 
-function onEraseStart() {
-    /** @type {SVGElement[]} */
+/** @param {MouseEvent} e */
+function onEraseStart(e) {
+    /** @type {Array<SVGElement>} */
     const elements = [];
     /** @param {MouseEvent} e */
     function onErase(e) {
@@ -379,21 +381,18 @@ function onEraseStart() {
     }, {once: true})
 }
 
-/** @type {(e: MouseEvent) => void} */
-function onDragStart() {
-    const onDrag = e => translate(e.movementX, e.movementY);
+/** @param {MouseEvent} e */
+function onDragStart(e) {
+    const fixX = mouse.x, fixY = mouse.y;
+    const onDrag = e => {
+        matrix.e = e.clientX + (bound.x - fixX) * matrix.a
+        matrix.f = e.clientY + (bound.y - fixY) * matrix.d
+    }
+    
     document.addEventListener('mousemove', onDrag);
     document.addEventListener('newaction', e => {
         document.removeEventListener('mousemove', onDrag);
     }, { once: true });
-}
-
-/** screen coordinate
- * @type {(dx: number, dy: number) => void}
- */
-function translate(dx, dy) {
-    matrix.e += dx;
-    matrix.f += dy;
 }
 
 /**
@@ -434,8 +433,9 @@ function saveSVG() {
 function loadSVG() {
     const input = document.createElement('input')
     input.type = 'file'
-    input.accept = '.svg'
+    input.accept = 'image/svg+xml'
     input.onchange = e => {
+        if (e.target.files[0].type !== 'image/svg+xml') return;
         const reader = new FileReader()
         const div = document.createElement('div')
         reader.onload = () => {
@@ -448,6 +448,9 @@ function loadSVG() {
             bound.bottom = tempBound.y + tempBound.height + 1000
             svg.width.baseVal.value = bound.width = bound.right - bound.x
             svg.height.baseVal.value = bound.height = bound.bottom - bound.y
+            matrix.a = matrix.d = 1
+            matrix.e = (window.innerWidth - bound.width) / 2 // center
+            matrix.f = (window.innerHeight - bound.height) / 2 // center
         }
         reader.readAsText(e.target.files[0])
     }
@@ -475,8 +478,8 @@ if (DEBUG) {
     anchorPoint.style.translate = '-50% -50%';
     document.body.appendChild(anchorPoint);
     
-    const reverseMODE = Object.fromEntries(Object.entries(MODE).map(([k, v]) => [v, k]))
-    const reverseACTION = Object.fromEntries(Object.entries(ACTION).map(([k, v]) => [v, k]))
+    // const reverseMODE = Object.fromEntries(Object.entries(MODE).map(([k, v]) => [v, k]))
+    // const reverseACTION = Object.fromEntries(Object.entries(ACTION).map(([k, v]) => [v, k]))
     
     function updateDebugInfo(e) {
         anchorPoint.style.left = `${matrix.e - bound.x * matrix.a}px`;
@@ -498,8 +501,6 @@ if (DEBUG) {
             matrix.f: ${matrix.f.toFixed(2)}<br>
             window.innerWidth: ${window.innerWidth}<br>
             window.innerHeight: ${window.innerHeight}<br>
-            mode: ${reverseMODE[String(state.mode)]}<br>
-            action: ${reverseACTION[String(state.action)]}<br>
         `;
     }
     
